@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "entity": "hospital.clinical.patients",
+      "entity_kind": "table",
+      "tag": "clinical",
+      "set_by": "governance_admin",
+      "set_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "entity": "hospital.clinical.patients:ssn",
+      "entity_kind": "column",
+      "tag": "pii",
+      "set_by": "governance_admin",
+      "set_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "entity": "hospital.clinical.patients:diagnosis",
+      "entity_kind": "column",
+      "tag": "phi",
+      "set_by": "governance_admin",
+      "set_at": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

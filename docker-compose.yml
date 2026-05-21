@@ -1,0 +1,229 @@
+# Local Compose stack for the policast-datafusion + policast-uc stack.
+#
+# Quick reference:
+#   docker compose up -d sidecar                             # resolver
+#   docker compose --profile tools run --rm compile          # rebuild Cedar manifest
+#   docker compose --profile demo  run --rm datafusion-demo  # end-to-end query
+#   docker compose --profile shell run --rm df-shell         # interactive dev shell
+#   docker compose --profile uc-oss up -d unitycatalog       # UC OSS server only
+#   docker compose --profile uc-full up -d \
+#     minio minio-init unitycatalog uc-bootstrap sidecar-uc-full
+#                                                       # full UC + MinIO flow
+#
+# See docker/README.md for the full walkthrough and known limitations.
+
+x-build-context: &build-context
+  context: .
+  dockerfile: docker/Dockerfile
+
+services:
+  sidecar:
+    build:
+      <<: *build-context
+      target: sidecar
+    image: policast-sidecar:local
+    container_name: policast-sidecar
+    environment:
+      POLICAST_UC_SECRET: ${POLICAST_UC_SECRET:?POLICAST_UC_SECRET must be set (see docker/.env.example)}
+    ports:
+      - "${POLICAST_UC_PORT:-8765}:8765"
+    volumes:
+      - ./examples/uc/store:/data/store:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:8765/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 2s
+    restart: unless-stopped
+    networks: [policast]
+
+  sidecar-uc-full:
+    profiles: ["uc-full"]
+    build:
+      <<: *build-context
+      target: sidecar
+    image: policast-sidecar:local
+    container_name: policast-sidecar-uc-full
+    depends_on:
+      uc-bootstrap:
+        condition: service_completed_successfully
+    command:
+      [
+        "--listen", "0.0.0.0:8765",
+        "--backend", "uc-bootstrap",
+        "--uc-endpoint", "http://unitycatalog:8080",
+        "--uc-storage-uri-template", "file:///data/uc-full-store/{table}",
+        "--uc-refresh-interval-secs", "${POLICAST_UC_REFRESH_SECS:-30}",
+        "--signing-secret-env", "POLICAST_UC_SECRET"
+      ]
+    environment:
+      POLICAST_UC_SECRET: ${POLICAST_UC_SECRET:?POLICAST_UC_SECRET must be set (see docker/.env.example)}
+    ports:
+      - "${POLICAST_UC_FULL_PORT:-8766}:8765"
+    volumes:
+      - uc-full-store:/data/uc-full-store
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:8765/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    networks: [policast]
+
+  datafusion-demo:
+    profiles: ["demo"]
+    build:
+      <<: *build-context
+      target: demo
+    image: policast-demo:local
+    depends_on:
+      sidecar:
+        condition: service_healthy
+    environment:
+      POLICAST_UC_ENDPOINT: ${POLICAST_UC_ENDPOINT:-http://sidecar:8765}
+      POLICAST_UC_SECRET: ${POLICAST_UC_SECRET:?POLICAST_UC_SECRET must be set}
+      # Use `-` (not `:-`) so `FOO=` on the host is passed through as
+      # empty rather than being replaced with the default. This lets
+      # `just demo-physician` actually unset region.
+      POLICAST_PRINCIPAL_ID: ${POLICAST_PRINCIPAL_ID-alice@hospital.com}
+      POLICAST_PRINCIPAL_ROLE: ${POLICAST_PRINCIPAL_ROLE-analyst}
+      POLICAST_PRINCIPAL_REGION: ${POLICAST_PRINCIPAL_REGION-us-east}
+      POLICAST_PRINCIPAL_NAME: ${POLICAST_PRINCIPAL_NAME-}
+      POLICAST_TABLE: ${POLICAST_TABLE-hospital.clinical.patients}
+      # Short name for the GovernedTable inside DataFusion. The Cedar
+      # column-mask policies use the short name in their CEL
+      # (`resource.table_name == "patients"`). Unset => derived from the
+      # last segment of POLICAST_TABLE.
+      POLICAST_GOVERNED_NAME: ${POLICAST_GOVERNED_NAME-}
+    networks: [policast]
+
+  compile:
+    profiles: ["tools"]
+    build:
+      <<: *build-context
+      target: shell
+    image: policast-shell:local
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-target:/workspace/target
+    command: ["bash", "scripts/compile-policies.sh"]
+    networks: [policast]
+
+  df-shell:
+    profiles: ["shell"]
+    build:
+      <<: *build-context
+      target: shell
+    image: policast-shell:local
+    working_dir: /workspace
+    tty: true
+    stdin_open: true
+    environment:
+      POLICAST_UC_ENDPOINT: ${POLICAST_UC_ENDPOINT:-http://sidecar:8765}
+      POLICAST_UC_SECRET: ${POLICAST_UC_SECRET:-}
+    volumes:
+      - .:/workspace
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-target:/workspace/target
+    command: ["/bin/bash"]
+    networks: [policast]
+
+  # MinIO backing store for the full UC profile. Hosts the
+  # `policast-demo` bucket carrying governance delta tables.
+  minio:
+    profiles: ["uc-full"]
+    image: ${MINIO_IMAGE:-minio/minio:latest}
+    container_name: policast-minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+    networks: [policast]
+
+  # One-shot bucket bootstrap for MinIO.
+  minio-init:
+    profiles: ["uc-full"]
+    image: minio/mc:latest
+    container_name: policast-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      [
+        "/bin/sh",
+        "-ec",
+        "mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} && mc mb -p local/policast-demo && mc ls local/policast-demo",
+      ]
+    restart: "no"
+    networks: [policast]
+
+  # Staged UC OSS service (profile uc-oss) and full-flow dependency
+  # (profile uc-full).
+  unitycatalog:
+    profiles: ["uc-oss", "uc-full"]
+    image: ${UNITYCATALOG_IMAGE:-newfrontdocker/unitycatalog:v0.4.1}
+    container_name: policast-unitycatalog
+    ports:
+      - "${UNITYCATALOG_PORT:-8081}:8080"
+    restart: unless-stopped
+    networks: [policast]
+
+  # One-shot bootstrap: validates the DDL inputs and publishes the
+  # shipped template manifest + bindings + tags into MinIO-backed
+  # governance Delta tables (`policies`, `manifest`, `bindings`,
+  # `tags`) via the `policast-uc-seed` binary.
+  uc-bootstrap:
+    profiles: ["uc-full"]
+    build:
+      <<: *build-context
+      target: shell
+    image: policast-shell:local
+    container_name: policast-uc-bootstrap
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      unitycatalog:
+        condition: service_started
+    working_dir: /workspace
+    environment:
+      POLICAST_UC_ENDPOINT: http://unitycatalog:8080
+      POLICAST_STORE_ROOT: examples/uc/store
+      POLICAST_UC_STORAGE_URI_TEMPLATE: file:///workspace/.uc-full-store/{table}
+      MINIO_ENDPOINT_URL: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+    volumes:
+      - .:/workspace
+      - uc-full-store:/workspace/.uc-full-store
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-target:/workspace/target
+    command: ["bash", "docker/bootstrap/uc-full-init.sh"]
+    restart: "no"
+    networks: [policast]
+
+volumes:
+  cargo-registry:
+  cargo-target:
+  minio-data:
+  uc-full-store:
+
+networks:
+  policast:
+    name: policast

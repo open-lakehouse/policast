@@ -1,0 +1,39 @@
+{
+  "rows": [
+    {
+      "binding_id": "b-row-region",
+      "policy_id": "row_filter_region",
+      "target": "hospital.clinical.patients",
+      "principal_selector": "role:analyst",
+      "precedence": 100
+    },
+    {
+      "binding_id": "b-row-physician",
+      "policy_id": "row_filter_physician",
+      "target": "hospital.clinical.patients",
+      "principal_selector": "role:physician",
+      "precedence": 100
+    },
+    {
+      "binding_id": "b-mask-pii",
+      "policy_id": "column_mask_by_pii_tag",
+      "target": "hospital.clinical.patients",
+      "principal_selector": "*",
+      "precedence": 50
+    },
+    {
+      "binding_id": "b-mask-phi",
+      "policy_id": "column_mask_by_phi_tag",
+      "target": "hospital.clinical.patients",
+      "principal_selector": "*",
+      "precedence": 50
+    },
+    {
+      "binding_id": "b-deny-legal-hold",
+      "policy_id": "deny_legal_hold",
+      "target": "hospital.clinical.patients",
+      "principal_selector": "*",
+      "precedence": 200
+    }
+  ]
+}

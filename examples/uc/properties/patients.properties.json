@@ -1,0 +1,8 @@
+{
+  "table": "hospital.clinical.patients",
+  "properties": {
+    "policast.applied_policies": "row_filter_region,row_filter_physician,column_mask_by_pii_tag,column_mask_by_phi_tag,deny_legal_hold",
+    "policast.sensitivity": "phi",
+    "policast.last_bound_at": "2026-04-21T20:00:00Z"
+  }
+}

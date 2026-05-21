@@ -1,0 +1,11 @@
+patient_id,name,ssn,diagnosis,region,treating_physician,legal_hold
+1001,Alice Johnson,123-45-6789,Hypertension,us-east,Dr. Smith,false
+1002,Bob Martinez,234-56-7890,Diabetes Type 2,us-west,Dr. Lee,false
+1003,Carol White,345-67-8901,Asthma,us-east,Dr. Smith,false
+1004,David Kim,456-78-9012,Migraine,eu-west,Dr. Mueller,false
+1005,Eva Chen,567-89-0123,Anemia,us-west,Dr. Lee,true
+1006,Frank Brown,678-90-1234,Arthritis,us-east,Dr. Patel,false
+1007,Grace Tanaka,789-01-2345,Depression,eu-west,Dr. Mueller,false
+1008,Henry Wilson,890-12-3456,Hypertension,us-west,Dr. Lee,false
+1009,Irene Lopez,901-23-4567,Diabetes Type 1,us-east,Dr. Patel,true
+1010,James O'Brien,012-34-5678,Allergies,eu-west,Dr. Mueller,false

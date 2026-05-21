@@ -1,0 +1,60 @@
+{
+  "version": "1.0",
+  "policies": [
+    {
+      "id": "column_mask_by_phi_tag",
+      "effect": "forbid",
+      "filter_type": "column_mask",
+      "target_table": "*",
+      "applies_to_tag": "phi",
+      "cel_expression": "!(((principal.role == \"admin\") || (principal.role == \"physician\")))",
+      "description": "Mask columns tagged `phi` for non-admin, non-physician users"
+    },
+    {
+      "id": "column_mask_by_pii_tag",
+      "effect": "forbid",
+      "filter_type": "column_mask",
+      "target_table": "*",
+      "applies_to_tag": "pii",
+      "cel_expression": "!(((principal.role == \"admin\") || (principal.role == \"physician\")))",
+      "description": "Mask columns tagged `pii` for non-admin, non-physician users"
+    },
+    {
+      "id": "deny_legal_hold",
+      "effect": "forbid",
+      "filter_type": "deny_override",
+      "target_table": "patients",
+      "cel_expression": "(resource.legal_hold == true) && !((principal.role == \"legal\"))",
+      "description": "Block access to records under legal hold unless user has legal role"
+    },
+    {
+      "id": "row_filter_region",
+      "effect": "permit",
+      "filter_type": "row_filter",
+      "target_table": "*",
+      "target_tag": "clinical",
+      "cel_expression": "(resource.region == principal.region)",
+      "applies_to": {
+        "roles": [
+          "analyst"
+        ],
+        "principals": []
+      },
+      "description": "Restrict analysts to clinical rows in their assigned region"
+    },
+    {
+      "id": "row_filter_physician",
+      "effect": "permit",
+      "filter_type": "row_filter",
+      "target_table": "patients",
+      "cel_expression": "(resource.treating_physician == principal.name)",
+      "applies_to": {
+        "roles": [
+          "physician"
+        ],
+        "principals": []
+      },
+      "description": "Restrict physicians to their own patients"
+    }
+  ]
+}
