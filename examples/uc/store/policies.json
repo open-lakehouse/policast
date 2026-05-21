@@ -1,0 +1,57 @@
+{
+  "rows": [
+    {
+      "policy_id": "row_filter_region",
+      "filter_type": "row_filter",
+      "target_table": "*",
+      "target_tag": "clinical",
+      "column": null,
+      "effect": "permit",
+      "applies_to_roles": ["analyst"],
+      "description": "Restrict analysts to clinical rows in their assigned region",
+      "version": 1
+    },
+    {
+      "policy_id": "row_filter_physician",
+      "filter_type": "row_filter",
+      "target_table": "hospital.clinical.patients",
+      "column": null,
+      "effect": "permit",
+      "applies_to_roles": ["physician"],
+      "description": "Restrict physicians to their own patients",
+      "version": 1
+    },
+    {
+      "policy_id": "column_mask_by_pii_tag",
+      "filter_type": "column_mask",
+      "target_table": "*",
+      "column": null,
+      "applies_to_tag": "pii",
+      "effect": "forbid",
+      "applies_to_roles": null,
+      "description": "Mask columns tagged `pii` for non-admin, non-physician users",
+      "version": 1
+    },
+    {
+      "policy_id": "column_mask_by_phi_tag",
+      "filter_type": "column_mask",
+      "target_table": "*",
+      "column": null,
+      "applies_to_tag": "phi",
+      "effect": "forbid",
+      "applies_to_roles": null,
+      "description": "Mask columns tagged `phi` for non-admin, non-physician users",
+      "version": 1
+    },
+    {
+      "policy_id": "deny_legal_hold",
+      "filter_type": "deny_override",
+      "target_table": "hospital.clinical.patients",
+      "column": null,
+      "effect": "forbid",
+      "applies_to_roles": null,
+      "description": "Block access to records under legal hold unless user has legal role",
+      "version": 1
+    }
+  ]
+}

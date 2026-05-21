@@ -1,0 +1,41 @@
+# Build artifacts
+target/
+**/target/
+policast-spark/target/
+policast-spark/project/target/
+policast-spark/project/project/
+
+# Version control
+.git/
+.gitignore
+.github/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Cargo caches (local)
+.cargo/registry/
+.cargo/git/
+
+# Python (if any tooling creeps in)
+__pycache__/
+*.py[codz]
+.venv/
+venv/
+
+# Docs / research we don't need inside images
+research/
+docs/
+
+# Compose-local state
+docker/.env
+.env
+
+# Node (if any)
+node_modules/
+
+# OS
+Thumbs.db

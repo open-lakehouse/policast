@@ -1,0 +1,61 @@
+[package]
+name = "policast-uc"
+version = "0.1.0"
+edition = "2021"
+description = "Unity Catalog policy store + resolver sidecar for policast-cel"
+license = "Apache-2.0"
+
+[features]
+default      = ["client"]
+client       = ["dep:reqwest"]
+sidecar      = ["dep:axum", "dep:tower", "dep:tower-http", "dep:clap"]
+# `uc-bootstrap` enables the Unity Catalog bootstrap backend. It pulls
+# in `deltalake` + `datafusion` so the sidecar can open governance
+# Delta tables directly and snapshot them into memory. This is opt-in
+# because the dep fan-out is significant (tens of transitive crates);
+# the flat-file `FileBackend` remains the default sidecar backend.
+uc-bootstrap = ["dep:deltalake", "dep:datafusion", "dep:reqwest"]
+
+[dependencies]
+policast-core = { path = "../policast-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+lru = "0.12"
+time = { version = "0.3", features = ["serde", "serde-well-known"] }
+parking_lot = "0.12"
+
+# Client dependencies (gated by `client` feature)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+
+# Sidecar dependencies (gated by `sidecar` feature)
+axum       = { version = "0.7", optional = true }
+tower      = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["trace"], optional = true }
+clap       = { version = "4", features = ["derive"], optional = true }
+
+# UC bootstrap backend dependencies (gated by `uc-bootstrap` feature).
+# Matches the `deltalake 0.25` / `datafusion 46` pinning used by
+# `policast-datafusion`; see the revert in commit 7f84d9b for the
+# conflict story with `deltalake 0.31` + `datafusion 52`.
+deltalake  = { version = "0.25", features = ["datafusion"], optional = true }
+datafusion = { version = "46", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+
+[[bin]]
+name = "policast-uc-sidecar"
+path = "src/bin/sidecar.rs"
+required-features = ["sidecar"]
+
+[[bin]]
+name = "policast-uc-seed"
+path = "src/bin/seed.rs"
+required-features = ["sidecar", "uc-bootstrap"]

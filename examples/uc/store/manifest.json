@@ -1,0 +1,39 @@
+{
+  "rows": [
+    {
+      "policy_id": "row_filter_region",
+      "cel_expression": "(resource.region == principal.region)",
+      "version": 1,
+      "compiler_version": "0.1.0",
+      "source_hash": "sha256:row_filter_region@v1"
+    },
+    {
+      "policy_id": "row_filter_physician",
+      "cel_expression": "(resource.treating_physician == principal.name)",
+      "version": 1,
+      "compiler_version": "0.1.0",
+      "source_hash": "sha256:row_filter_physician@v1"
+    },
+    {
+      "policy_id": "column_mask_by_pii_tag",
+      "cel_expression": "!(((principal.role == \"admin\") || (principal.role == \"physician\")))",
+      "version": 1,
+      "compiler_version": "0.1.0",
+      "source_hash": "sha256:column_mask_by_pii_tag@v1"
+    },
+    {
+      "policy_id": "column_mask_by_phi_tag",
+      "cel_expression": "!(((principal.role == \"admin\") || (principal.role == \"physician\")))",
+      "version": 1,
+      "compiler_version": "0.1.0",
+      "source_hash": "sha256:column_mask_by_phi_tag@v1"
+    },
+    {
+      "policy_id": "deny_legal_hold",
+      "cel_expression": "(resource.legal_hold == true) && !((principal.role == \"legal\"))",
+      "version": 1,
+      "compiler_version": "0.1.0",
+      "source_hash": "sha256:deny_legal_hold@v1"
+    }
+  ]
+}

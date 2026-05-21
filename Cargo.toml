@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "policast-core",
+    "policast-datafusion",
+    "policast-uc",
+]
+resolver = "2"
