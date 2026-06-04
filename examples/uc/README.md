@@ -140,7 +140,7 @@ useful for one-shot tests and debugging, **not** for production where
 an admin edit to a Cedar policy would stop propagating.
 
 See
-[`policast-uc/src/bin/sidecar.rs`](../../policast-uc/src/bin/sidecar.rs)
+[`crates/policast-uc/src/bin/sidecar.rs`](../../crates/policast-uc/src/bin/sidecar.rs)
 for the full flag list and
-[`policast-uc/src/uc_bootstrap.rs`](../../policast-uc/src/uc_bootstrap.rs)
+[`crates/policast-uc/src/uc_bootstrap.rs`](../../crates/policast-uc/src/uc_bootstrap.rs)
 for the backend implementation.

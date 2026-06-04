@@ -409,6 +409,8 @@ mod tests {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
+            .parent()
+            .unwrap()
             .join("examples/uc/store");
         FileBackend::new(root)
     }

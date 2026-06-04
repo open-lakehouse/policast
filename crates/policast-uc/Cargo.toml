@@ -1,9 +1,12 @@
 [package]
 name = "policast-uc"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Unity Catalog policy store + resolver sidecar for policast-cel"
-license = "Apache-2.0"
+
+[lints]
+workspace = true
 
 [features]
 default      = ["client"]
@@ -18,37 +21,37 @@ uc-bootstrap = ["dep:deltalake", "dep:datafusion", "dep:reqwest"]
 
 [dependencies]
 policast-core = { path = "../policast-core" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-async-trait = "0.1"
-thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-hmac = "0.12"
-sha2 = "0.10"
-hex = "0.4"
-lru = "0.12"
-time = { version = "0.3", features = ["serde", "serde-well-known"] }
-parking_lot = "0.12"
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+lru = { workspace = true }
+time = { workspace = true }
+parking_lot = { workspace = true }
 
 # Client dependencies (gated by `client` feature)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+reqwest = { workspace = true, optional = true }
 
 # Sidecar dependencies (gated by `sidecar` feature)
-axum       = { version = "0.7", optional = true }
-tower      = { version = "0.4", optional = true }
-tower-http = { version = "0.5", features = ["trace"], optional = true }
-clap       = { version = "4", features = ["derive"], optional = true }
+axum       = { workspace = true, optional = true }
+tower      = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+clap       = { workspace = true, optional = true }
 
 # UC bootstrap backend dependencies (gated by `uc-bootstrap` feature).
 # Matches the `deltalake 0.25` / `datafusion 46` pinning used by
 # `policast-datafusion`; see the revert in commit 7f84d9b for the
 # conflict story with `deltalake 0.31` + `datafusion 52`.
-deltalake  = { version = "0.25", features = ["datafusion"], optional = true }
-datafusion = { version = "46", optional = true }
+deltalake  = { workspace = true, optional = true }
+datafusion = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
-tempfile = "3"
+tokio = { workspace = true, features = ["full"] }
+tempfile = { workspace = true }
 
 [[bin]]
 name = "policast-uc-sidecar"

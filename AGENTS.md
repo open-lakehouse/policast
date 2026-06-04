@@ -44,8 +44,8 @@ Cedar Policy (.cedar)
 
 | Path | Language | Purpose |
 |------|----------|---------|
-| `policast-core/` | Rust | Cedar parser, CEL emitter, CLI binary (`policast`), policy manifest |
-| `policast-datafusion/` | Rust | DataFusion `GovernedTable` wrapper, CEL→DataFusion `Expr` compiler, row filters, column masks, optional Delta Lake via `delta` feature |
+| `crates/policast-core/` | Rust | Cedar parser, CEL emitter, CLI binary (`policast`), policy manifest |
+| `crates/policast-datafusion/` | Rust | DataFusion `GovernedTable` wrapper, CEL→DataFusion `Expr` compiler, row filters, column masks, optional Delta Lake via `delta` feature |
 | `policast-spark/` | Scala | Spark 3.5 plugin, Catalyst optimizer rules, CEL evaluator (cel-java), not a Cargo workspace member |
 | `examples/` | Mixed | Cedar policies, sample data (`patients.csv`), DataFusion and Spark demo runners |
 | `scripts/` | Shell | `compile-policies.sh` convenience script |
@@ -56,8 +56,8 @@ Cedar Policy (.cedar)
 
 Use these focused guides when working inside a specific module:
 
-- [`policast-core/AGENTS.md`](policast-core/AGENTS.md)
-- [`policast-datafusion/AGENTS.md`](policast-datafusion/AGENTS.md)
+- [`crates/policast-core/AGENTS.md`](crates/policast-core/AGENTS.md)
+- [`crates/policast-datafusion/AGENTS.md`](crates/policast-datafusion/AGENTS.md)
 - [`policast-spark/AGENTS.md`](policast-spark/AGENTS.md)
 
 ### Key dependencies

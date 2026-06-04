@@ -41,14 +41,14 @@ WORKDIR /workspace
 COPY .cargo ./.cargo
 
 COPY Cargo.toml Cargo.lock ./
-COPY policast-core/Cargo.toml policast-core/Cargo.toml
-COPY policast-datafusion/Cargo.toml policast-datafusion/Cargo.toml
-COPY policast-uc/Cargo.toml policast-uc/Cargo.toml
+COPY crates/policast-core/Cargo.toml crates/policast-core/Cargo.toml
+COPY crates/policast-datafusion/Cargo.toml crates/policast-datafusion/Cargo.toml
+COPY crates/policast-uc/Cargo.toml crates/policast-uc/Cargo.toml
 
-COPY policast-core/src policast-core/src
-COPY policast-datafusion/src policast-datafusion/src
-COPY policast-datafusion/tests policast-datafusion/tests
-COPY policast-uc/src policast-uc/src
+COPY crates/policast-core/src crates/policast-core/src
+COPY crates/policast-datafusion/src crates/policast-datafusion/src
+COPY crates/policast-datafusion/tests crates/policast-datafusion/tests
+COPY crates/policast-uc/src crates/policast-uc/src
 COPY examples examples
 COPY scripts scripts
 

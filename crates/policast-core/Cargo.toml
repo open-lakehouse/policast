@@ -1,0 +1,27 @@
+[package]
+name = "policast-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Compile Cedar policies into CEL expressions for portable data governance"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "policast"
+path = "src/main.rs"
+
+[dependencies]
+cedar-policy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+tempfile = { workspace = true }
