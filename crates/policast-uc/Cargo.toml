@@ -43,9 +43,11 @@ tower-http = { workspace = true, optional = true }
 clap       = { workspace = true, optional = true }
 
 # UC bootstrap backend dependencies (gated by `uc-bootstrap` feature).
-# Matches the `deltalake 0.25` / `datafusion 46` pinning used by
-# `policast-datafusion`; see the revert in commit 7f84d9b for the
-# conflict story with `deltalake 0.31` + `datafusion 52`.
+# Must stay pinned to the same `deltalake` / `datafusion` versions as
+# `policast-datafusion` (centralized in the workspace dependencies):
+# deltalake-core's transitive `chrono` pin is exact, so a mismatched
+# deltalake anywhere in the workspace (even behind an optional feature)
+# makes the lockfile unresolvable.
 deltalake  = { workspace = true, optional = true }
 datafusion = { workspace = true, optional = true }
 

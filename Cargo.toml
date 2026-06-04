@@ -35,10 +35,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 axum = "0.7"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["trace"] }
-# Pinned together; see the revert in commit 7f84d9b for the conflict
-# story with `deltalake 0.31` + `datafusion 52`.
-datafusion = "46"
-deltalake = { version = "0.25", features = ["datafusion"] }
+# Pinned together: deltalake-core's transitive `chrono` pin is exact, so a
+# mismatched deltalake anywhere in the workspace (even behind an optional
+# feature) makes the lockfile unresolvable.
+datafusion = "53"
+deltalake = { version = "0.32.3", features = ["datafusion"] }
 # Dev-only shared deps.
 pretty_assertions = "1"
 tempfile = "3"
