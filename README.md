@@ -1,4 +1,4 @@
-# policast-cel
+# Policast
 
 Compile [Cedar](https://www.cedarpolicy.com/) policies into [CEL](https://cel.dev/) (Common Expression Language) expressions for portable data governance across Apache Spark and Apache DataFusion.
 
