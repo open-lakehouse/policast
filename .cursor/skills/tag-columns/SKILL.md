@@ -120,7 +120,7 @@ For each `(column, type)` pair, ask in a **single compact question**:
 `examples/uc/store/tags.json` that adds the new rows into the `rows`
 array. Preserve alphabetical order by `entity` so the diff stays
 reviewable. Use this row shape (matches `TagRow` in
-`policast-uc/src/backend.rs`):
+`crates/policast-uc/src/backend.rs`):
 
 ```json
 {

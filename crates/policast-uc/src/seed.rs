@@ -471,6 +471,8 @@ mod tests {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
+            .parent()
+            .unwrap()
             .join("examples/uc/store")
     }
 

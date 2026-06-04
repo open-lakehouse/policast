@@ -1,9 +1,12 @@
 [package]
 name = "policast-datafusion"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "DataFusion integration for policast-cel governance policies"
-license = "Apache-2.0"
+
+[lints]
+workspace = true
 
 [features]
 default = []
@@ -13,33 +16,33 @@ uc    = ["dep:policast-uc", "policast-uc/client"]
 [dependencies]
 policast-core = { path = "../policast-core" }
 policast-uc   = { path = "../policast-uc", optional = true, default-features = false }
-datafusion = "53"
-deltalake = { version = "0.32.3", features = ["datafusion"], optional = true }
-cel-interpreter = "0.8"
-cel-parser = "0.7"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-async-trait = "0.1"
-tokio = { version = "1", features = ["full"] }
+datafusion = { workspace = true }
+deltalake = { workspace = true, optional = true }
+cel-interpreter = { workspace = true }
+cel-parser = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 
 [[example]]
 name = "run_datafusion"
-path = "../examples/run_datafusion.rs"
+path = "../../examples/run_datafusion.rs"
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 
 [[example]]
 name = "run_datafusion_delta"
-path = "../examples/run_datafusion_delta.rs"
+path = "../../examples/run_datafusion_delta.rs"
 required-features = ["delta"]
 
 [[example]]
 name = "run_datafusion_uc"
-path = "../examples/run_datafusion_uc.rs"
+path = "../../examples/run_datafusion_uc.rs"
 required-features = ["uc", "delta"]
 
 [[example]]
 name = "run_datafusion_uc_http"
-path = "../examples/run_datafusion_uc_http.rs"
+path = "../../examples/run_datafusion_uc_http.rs"
 required-features = ["uc", "delta"]

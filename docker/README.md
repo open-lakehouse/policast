@@ -96,7 +96,7 @@ analyst. Expected behavior:
 
 The masking is applied server-side in DataFusion by wrapping the scan
 in a `ProjectionExec` (see
-[`policast-datafusion/src/governance_table.rs`](../policast-datafusion/src/governance_table.rs)),
+[`crates/policast-datafusion/src/governance_table.rs`](../crates/policast-datafusion/src/governance_table.rs)),
 so the raw SSN never leaves the table provider for non-privileged
 roles.
 
@@ -142,15 +142,15 @@ docker compose --profile uc-oss up -d unitycatalog
 This starts the upstream UC OSS image on `:8081`. It is **not** yet
 consulted by the sidecar by default. Today the `sidecar` service runs
 the flat-file `FileBackend`
-([`policast-uc/src/backend.rs`](../policast-uc/src/backend.rs)) against
+([`crates/policast-uc/src/backend.rs`](../crates/policast-uc/src/backend.rs)) against
 the mounted `examples/uc/store/` directory. The production-backend
 replacement, `UcBootstrapBackend`
-([`policast-uc/src/uc_bootstrap.rs`](../policast-uc/src/uc_bootstrap.rs)),
+([`crates/policast-uc/src/uc_bootstrap.rs`](../crates/policast-uc/src/uc_bootstrap.rs)),
 is fully wired: it snapshots the four governance Delta tables
 (`policies`, `manifest`, `bindings`, `tags`) on startup and refreshes
 them every `--uc-refresh-interval-secs`, optionally fanning
 `InvalidateAll` out to the resolver's bundle cache via
-[`policast-uc/src/cdc.rs`](../policast-uc/src/cdc.rs).
+[`crates/policast-uc/src/cdc.rs`](../crates/policast-uc/src/cdc.rs).
 
 The sidecar binary is built with `--features sidecar,uc-bootstrap`
 (see the `sidecar-build` stage in
