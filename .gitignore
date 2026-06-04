@@ -260,8 +260,11 @@ vendor/
 # Java
 target/
 
-# Scala
+# Scala / sbt / Metals / Bloop
 .metals/
+.bloop/
+metals.sbt
+**/project/project/
 
 # IntelliJ
 .idea/
