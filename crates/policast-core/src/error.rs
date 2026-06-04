@@ -16,4 +16,7 @@ pub enum PolicastError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Policy cache error: {0}")]
+    Cache(String),
 }

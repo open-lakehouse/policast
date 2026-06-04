@@ -15,4 +15,9 @@ pub use model::{CompiledPolicy, Effect, FilterType, PrincipalContract};
 pub use policy_manifest::PolicyManifest;
 pub use profile::{PolicyProfile, CANONICAL_PRINCIPAL_ATTRS};
 pub use scaffold::{parse_profile_kind, render_scaffold, ScaffoldOptions};
-pub use policy_store::{FileManifestStore, PolicyQuery, PolicyStore, ResolvedPolicies};
+pub use policy_store::{
+    CacheFailMode, CachedPolicyStore, FileManifestStore, InMemoryCache, PolicyQuery, PolicyStore,
+    ResolvedCache, ResolvedPolicies,
+};
+#[cfg(feature = "redis")]
+pub use policy_store::RedisCache;
