@@ -59,12 +59,8 @@ class PolicastRowFilterRule(session: SparkSession) extends Rule[LogicalPlan] {
       .map(PolicyManifest.fromJson)
   }
 
-  private def resolveIdentity(): QueryIdentity = {
-    val role = session.conf.getOption("spark.policast.user.role").getOrElse("analyst")
-    val region = session.conf.getOption("spark.policast.user.region")
-    val name = session.conf.getOption("spark.policast.user.name")
-    QueryIdentity(role, region, name)
-  }
+  private def resolveIdentity(): QueryIdentity =
+    PolicastIdentity.fromConf(session)
 
   private def buildRowFilters(
       manifest: PolicyManifest,
@@ -134,12 +130,8 @@ class PolicastColumnMaskRule(session: SparkSession) extends Rule[LogicalPlan] {
       .map(PolicyManifest.fromJson)
   }
 
-  private def resolveIdentity(): QueryIdentity = {
-    val role = session.conf.getOption("spark.policast.user.role").getOrElse("analyst")
-    val region = session.conf.getOption("spark.policast.user.region")
-    val name = session.conf.getOption("spark.policast.user.name")
-    QueryIdentity(role, region, name)
-  }
+  private def resolveIdentity(): QueryIdentity =
+    PolicastIdentity.fromConf(session)
 
   private def collectMasks(
       manifest: PolicyManifest,

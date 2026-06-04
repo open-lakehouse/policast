@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{col, lit, Expr};
 
@@ -5,13 +7,43 @@ use policast_core::model::FilterType;
 use policast_core::PolicyManifest;
 
 use crate::cel_to_expr::{cel_to_bool, cel_to_datafusion_expr};
+use crate::identity::PrincipalProvider;
 
 /// Contextual identity of the user making the query.
+///
+/// A convenience [`PrincipalProvider`] for the common
+/// `role`/`region`/`name` shape used throughout the demos and tests. For
+/// identities that carry arbitrary attributes, use
+/// [`AttrIdentity`](crate::identity::AttrIdentity) or implement
+/// [`PrincipalProvider`] directly.
 #[derive(Debug, Clone)]
 pub struct QueryIdentity {
     pub role: String,
     pub region: Option<String>,
     pub name: Option<String>,
+}
+
+impl PrincipalProvider for QueryIdentity {
+    fn attribute(&self, name: &str) -> Option<String> {
+        match name {
+            "role" => Some(self.role.clone()),
+            "region" => self.region.clone(),
+            "name" => self.name.clone(),
+            _ => None,
+        }
+    }
+
+    fn principal_attributes(&self) -> BTreeMap<String, String> {
+        let mut attrs = BTreeMap::new();
+        attrs.insert("role".to_string(), self.role.clone());
+        if let Some(region) = &self.region {
+            attrs.insert("region".to_string(), region.clone());
+        }
+        if let Some(name) = &self.name {
+            attrs.insert("name".to_string(), name.clone());
+        }
+        attrs
+    }
 }
 
 /// Given a policy manifest and the identity of the querying user, produce
@@ -23,7 +55,7 @@ pub struct QueryIdentity {
 pub fn build_row_filters(
     manifest: &PolicyManifest,
     table_name: &str,
-    identity: &QueryIdentity,
+    identity: &dyn PrincipalProvider,
 ) -> DFResult<Vec<Expr>> {
     let mut filters = Vec::new();
 
@@ -68,7 +100,7 @@ pub fn build_row_filters(
 pub fn build_column_masks(
     manifest: &PolicyManifest,
     table_name: &str,
-    identity: &QueryIdentity,
+    identity: &dyn PrincipalProvider,
 ) -> Vec<(String, String)> {
     let mut masks = Vec::new();
 
@@ -104,7 +136,7 @@ pub fn build_column_masks(
 /// non-exempt users.
 fn build_deny_filter(
     cel: &str,
-    identity: &QueryIdentity,
+    identity: &dyn PrincipalProvider,
 ) -> Result<Option<Expr>, crate::cel_to_expr::CelConvertError> {
     let result = cel_to_datafusion_expr(cel, identity)?;
     match result {
@@ -154,6 +186,7 @@ mod tests {
         PolicyManifest {
             version: "1.0".into(),
             policies,
+            principal_contract: None,
         }
     }
 

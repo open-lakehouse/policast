@@ -6,7 +6,7 @@ use cel_parser::{ArithmeticOp, Atom, Expression, Member, RelationOp, UnaryOp};
 use datafusion::common::ScalarValue;
 use datafusion::logical_expr::{col, lit, not, Expr};
 
-use crate::cel_filter::QueryIdentity;
+use crate::identity::PrincipalProvider;
 
 /// Errors that can occur when converting CEL expressions.
 #[derive(Debug, Clone)]
@@ -54,7 +54,7 @@ enum Resolved {
 /// - `Err` if the expression cannot be translated.
 pub fn cel_to_datafusion_expr(
     cel: &str,
-    identity: &QueryIdentity,
+    identity: &dyn PrincipalProvider,
 ) -> Result<Option<Expr>, CelConvertError> {
     let parsed =
         cel_parser::parse(cel).map_err(|e| CelConvertError::ParseError(e.to_string()))?;
@@ -75,7 +75,7 @@ pub fn cel_to_datafusion_expr(
 /// column is masked.
 pub fn cel_to_bool(
     cel: &str,
-    identity: &QueryIdentity,
+    identity: &dyn PrincipalProvider,
     resource_table: &str,
 ) -> Result<bool, CelConvertError> {
     use cel_interpreter::{Context, Program, Value};
@@ -85,13 +85,9 @@ pub fn cel_to_bool(
 
     let mut ctx = Context::default();
 
-    let mut principal: HashMap<&str, Value> = HashMap::new();
-    principal.insert("role", Value::String(Arc::new(identity.role.clone())));
-    if let Some(ref region) = identity.region {
-        principal.insert("region", Value::String(Arc::new(region.clone())));
-    }
-    if let Some(ref name) = identity.name {
-        principal.insert("name", Value::String(Arc::new(name.clone())));
+    let mut principal: HashMap<String, Value> = HashMap::new();
+    for (key, value) in identity.principal_attributes() {
+        principal.insert(key, Value::String(Arc::new(value)));
     }
     ctx.add_variable_from_value("principal", principal);
 
@@ -113,7 +109,10 @@ pub fn cel_to_bool(
 // Recursive AST walker
 // ---------------------------------------------------------------------------
 
-fn convert_expr(expr: &Expression, identity: &QueryIdentity) -> Result<Resolved, CelConvertError> {
+fn convert_expr(
+    expr: &Expression,
+    identity: &dyn PrincipalProvider,
+) -> Result<Resolved, CelConvertError> {
     match expr {
         Expression::Atom(atom) => convert_atom(atom),
 
@@ -184,7 +183,7 @@ fn convert_atom(atom: &Atom) -> Result<Resolved, CelConvertError> {
 fn convert_member(
     left: &Expression,
     member: &Member,
-    identity: &QueryIdentity,
+    identity: &dyn PrincipalProvider,
 ) -> Result<Resolved, CelConvertError> {
     match (left, member) {
         (Expression::Ident(obj), Member::Attribute(field)) if obj.as_str() == "resource" => {
@@ -203,24 +202,12 @@ fn convert_member(
 
 fn resolve_principal_field(
     field: &str,
-    identity: &QueryIdentity,
+    identity: &dyn PrincipalProvider,
 ) -> Result<Resolved, CelConvertError> {
-    match field {
-        "role" => Ok(Resolved::Scalar(ScalarValue::Utf8(Some(
-            identity.role.clone(),
-        )))),
-        "region" => identity
-            .region
-            .as_ref()
-            .map(|r| Resolved::Scalar(ScalarValue::Utf8(Some(r.clone()))))
-            .ok_or_else(|| CelConvertError::MissingIdentityField("region".into())),
-        "name" => identity
-            .name
-            .as_ref()
-            .map(|n| Resolved::Scalar(ScalarValue::Utf8(Some(n.clone()))))
-            .ok_or_else(|| CelConvertError::MissingIdentityField("name".into())),
-        other => Err(CelConvertError::MissingIdentityField(other.into())),
-    }
+    identity
+        .attribute(field)
+        .map(|v| Resolved::Scalar(ScalarValue::Utf8(Some(v))))
+        .ok_or_else(|| CelConvertError::MissingIdentityField(field.into()))
 }
 
 // ---------------------------------------------------------------------------

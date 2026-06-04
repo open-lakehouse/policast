@@ -140,6 +140,7 @@ impl PolicyStore for FileManifestStore {
         let manifest = PolicyManifest {
             version: self.manifest.version.clone(),
             policies: matching.into_iter().cloned().collect(),
+            principal_contract: self.manifest.principal_contract.clone(),
         };
 
         Ok(ResolvedPolicies {
@@ -535,6 +536,7 @@ mod tests {
         FileManifestStore::from_manifest(PolicyManifest {
             version: "1.0".into(),
             policies,
+            principal_contract: None,
         })
     }
 

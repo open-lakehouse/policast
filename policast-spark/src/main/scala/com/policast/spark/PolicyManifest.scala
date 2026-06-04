@@ -20,10 +20,23 @@ case class CompiledPolicy(
     description: String
 )
 
+/** The compile-time footprint of `principal.*` attributes the policies need. */
+case class PrincipalContract(
+    required_attributes: java.util.List[String] = new java.util.ArrayList[String]()
+)
+
 case class PolicyManifest(
     version: String,
-    policies: java.util.List[CompiledPolicy]
+    policies: java.util.List[CompiledPolicy],
+    principal_contract: PrincipalContract = null
 ) {
+
+  /** Principal attributes the policy set requires, or empty if unset. */
+  def requiredPrincipalAttributes: Seq[String] =
+    Option(principal_contract)
+      .map(_.required_attributes.asScala.toSeq)
+      .getOrElse(Seq.empty)
+
   def policiesForTable(tableName: String): Seq[CompiledPolicy] = {
     policies.asScala.toSeq.filter { p =>
       p.target_table == tableName || p.target_table == "*"

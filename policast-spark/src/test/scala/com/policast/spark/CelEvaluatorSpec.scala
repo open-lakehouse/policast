@@ -78,4 +78,35 @@ class CelEvaluatorSpec extends AnyFunSuite with Matchers {
     val e2 = CelEvaluator.forSchema(patientsSchema)
     e1 should be theSameInstanceAs e2
   }
+
+  test("principalAttrsIn discovers arbitrary principal attributes") {
+    val cel = """(resource.x == principal.clearance) && (principal.role == "analyst")"""
+    CelEvaluator.principalAttrsIn(cel) shouldBe Set("clearance", "role")
+  }
+
+  test("evaluate supports a non-canonical principal attribute") {
+    val cel = """principal.clearance == "secret""""
+    val bindings = new java.util.HashMap[String, Any]()
+    bindings.put("principal_clearance", "secret")
+    evaluator.evaluate(cel, bindings) shouldBe true
+
+    val deny = new java.util.HashMap[String, Any]()
+    deny.put("principal_clearance", "public")
+    evaluator.evaluate(cel, deny) shouldBe false
+  }
+
+  test("principalBindings flattens identity attrs to principal_ vars") {
+    val identity = QueryIdentity("analyst", Some("us-east"), None, Map("clearance" -> "secret"))
+    val bindings = evaluator.principalBindings(identity)
+    bindings.get("principal_role") shouldBe "analyst"
+    bindings.get("principal_region") shouldBe "us-east"
+    bindings.get("principal_clearance") shouldBe "secret"
+    bindings.containsKey("principal_name") shouldBe false
+  }
+
+  test("shouldMask honors role supplied via attrs map") {
+    val cel = """(resource.table_name == "patients") && !((principal.role == "admin"))"""
+    val identity = QueryIdentity("admin", None, None, Map.empty)
+    evaluator.shouldMask(cel, identity) shouldBe false
+  }
 }

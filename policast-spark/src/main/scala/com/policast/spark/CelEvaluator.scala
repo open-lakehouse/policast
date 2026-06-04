@@ -27,31 +27,36 @@ import scala.collection.mutable
  */
 class CelEvaluator(schema: StructType) {
 
-  private lazy val compiler: CelCompiler = {
-    val builder = CelCompilerFactory.standardCelCompilerBuilder()
-      .addVar("principal_role", SimpleType.STRING)
-      .addVar("principal_region", SimpleType.STRING)
-      .addVar("principal_name", SimpleType.STRING)
-
-    schema.fields.foreach { field =>
-      builder.addVar(s"resource_${field.name}", CelEvaluator.sparkTypeToCel(field.dataType))
-    }
-
-    builder.build()
-  }
-
   private lazy val runtime: CelRuntime =
     CelRuntimeFactory.standardCelRuntimeBuilder().build()
 
   private lazy val resourceFieldNames: Seq[String] = schema.fieldNames.toSeq
 
   /**
+   * Build a CEL compiler whose principal variables cover the canonical
+   * vocabulary plus any extra attributes referenced by the expression being
+   * compiled. The principal surface is no longer hardcoded to
+   * role/region/name, so policies may reference `principal.<anything>`.
+   */
+  private def buildCompiler(principalAttrs: Set[String]): CelCompiler = {
+    val builder = CelCompilerFactory.standardCelCompilerBuilder()
+    (CelEvaluator.CanonicalPrincipalAttrs ++ principalAttrs).foreach { attr =>
+      builder.addVar(s"principal_$attr", SimpleType.STRING)
+    }
+    schema.fields.foreach { field =>
+      builder.addVar(s"resource_${field.name}", CelEvaluator.sparkTypeToCel(field.dataType))
+    }
+    builder.build()
+  }
+
+  /**
    * Evaluate a CEL boolean expression using cel-java with the given bindings.
    */
   def evaluate(celExpression: String, bindings: JMap[String, Any]): Boolean = {
     try {
+      val principalAttrs = CelEvaluator.principalAttrsIn(celExpression)
       val normalized = normalizeCelForRuntime(celExpression)
-      val ast: CelAbstractSyntaxTree = compiler.compile(normalized).getAst
+      val ast: CelAbstractSyntaxTree = buildCompiler(principalAttrs).compile(normalized).getAst
       val program = runtime.createProgram(ast)
       program.eval(bindings).asInstanceOf[Boolean]
     } catch {
@@ -59,6 +64,19 @@ class CelEvaluator(schema: StructType) {
         System.err.println(s"[WARN] Policast CEL evaluation failed: ${e.getMessage}")
         false
     }
+  }
+
+  /**
+   * Build cel-java bindings for the `principal` from an identity, flattening
+   * each attribute to a `principal_<attr>` variable matching the names
+   * produced by [[normalizeCelForRuntime]].
+   */
+  def principalBindings(identity: QueryIdentity): JMap[String, Any] = {
+    val bindings = new java.util.HashMap[String, Any]()
+    identity.principalAttributes.foreach { case (key, value) =>
+      bindings.put(s"principal_$key", value)
+    }
+    bindings
   }
 
   /**
@@ -74,14 +92,14 @@ class CelEvaluator(schema: StructType) {
       identity: QueryIdentity
   ): Option[Expression] = {
     if (cel.contains("resource.region") && cel.contains("principal.region")) {
-      identity.region.flatMap { region =>
+      identity.attribute("region").flatMap { region =>
         findAttribute(output, "region").map { attr =>
           EqualTo(attr, Literal(region, StringType))
         }
       }
     }
     else if (cel.contains("resource.treating_physician") && cel.contains("principal.name")) {
-      identity.name.flatMap { name =>
+      identity.attribute("name").flatMap { name =>
         findAttribute(output, "treating_physician").map { attr =>
           EqualTo(attr, Literal(name, StringType))
         }
@@ -104,7 +122,7 @@ class CelEvaluator(schema: StructType) {
       identity: QueryIdentity
   ): Option[Expression] = {
     if (cel.contains("resource.legal_hold") && cel.contains("principal.role")) {
-      if (identity.role != "legal") {
+      if (identity.attribute("role").getOrElse("") != "legal") {
         findAttribute(output, "legal_hold").map { attr =>
           Or(
             EqualTo(attr, Literal(false, BooleanType)),
@@ -126,7 +144,7 @@ class CelEvaluator(schema: StructType) {
    */
   def shouldMask(cel: String, identity: QueryIdentity): Boolean = {
     if (cel.contains("principal.role")) {
-      val role = identity.role
+      val role = identity.attribute("role").getOrElse("")
       if (cel.contains("\"admin\"") && role == "admin") return false
       if (cel.contains("\"physician\"") && role == "physician") return false
     }
@@ -135,8 +153,9 @@ class CelEvaluator(schema: StructType) {
 
   /**
    * Normalize a policast CEL expression into a form that cel-java can parse.
-   * Replaces `resource.X` and `principal.X` with flat variable names,
-   * driven by the schema rather than hardcoded field names.
+   * Replaces `resource.X` and `principal.X` with flat variable names. The
+   * principal rewrite is generic (any `principal.<attr>` becomes
+   * `principal_<attr>`) rather than a fixed role/region/name list.
    */
   private def normalizeCelForRuntime(cel: String): String = {
     var result = cel
@@ -147,10 +166,7 @@ class CelEvaluator(schema: StructType) {
       result = result.replace(s"resource.$name", s"resource_$name")
     }
 
-    result
-      .replace("principal.role", "principal_role")
-      .replace("principal.region", "principal_region")
-      .replace("principal.name", "principal_name")
+    CelEvaluator.PrincipalRef.replaceAllIn(result, m => s"principal_${m.group(1)}")
   }
 
   private def findAttribute(
@@ -162,6 +178,16 @@ class CelEvaluator(schema: StructType) {
 }
 
 object CelEvaluator {
+
+  /** The canonical principal attribute vocabulary, always declared. */
+  val CanonicalPrincipalAttrs: Set[String] = Set("role", "region", "name", "groups")
+
+  /** Matches `principal.<attr>` references in a CEL expression. */
+  private val PrincipalRef = """principal\.([A-Za-z_][A-Za-z0-9_]*)""".r
+
+  /** The set of principal attribute names referenced by a CEL expression. */
+  def principalAttrsIn(cel: String): Set[String] =
+    PrincipalRef.findAllMatchIn(cel).map(_.group(1)).toSet
 
   private val cache: mutable.Map[StructType, CelEvaluator] =
     mutable.Map.empty

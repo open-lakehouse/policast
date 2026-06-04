@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
-use policast_core::model::{CompiledPolicy, Effect, FilterType};
-use policast_core::{parse_policies, PolicyManifest};
+use policast_core::model::{CompiledPolicy, Effect, FilterType, PrincipalContract};
+use policast_core::scaffold::{parse_profile_kind, render_scaffold, ScaffoldOptions};
+use policast_core::{parse_policies, render_identity, IdentityLang, PolicyManifest};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -44,6 +45,51 @@ enum Commands {
     Uc {
         #[command(subcommand)]
         op: UcOp,
+    },
+
+    /// Scaffold a new Cedar policy from one of the opinionated profiles
+    /// (row-filter, column-mask, deny-override).
+    New {
+        /// Profile to scaffold: row-filter | column-mask | deny-override.
+        profile: String,
+        /// `@id` annotation for the policy.
+        #[arg(long)]
+        id: Option<String>,
+        /// Scope the policy to a concrete table (`@target_table`).
+        #[arg(long)]
+        table: Option<String>,
+        /// Scope the policy to a table tag (`@target_tag`).
+        #[arg(long = "target-tag")]
+        target_tag: Option<String>,
+        /// Column to mask (column-mask only).
+        #[arg(long)]
+        column: Option<String>,
+        /// Column tag to mask (column-mask only, `@applies_to_tag`).
+        #[arg(long)]
+        tag: Option<String>,
+        /// Roles: `@roles` for row-filter, exemption list for masks/denies.
+        #[arg(long)]
+        role: Vec<String>,
+        /// `@description` annotation.
+        #[arg(long)]
+        description: Option<String>,
+        /// Write to a file instead of stdout.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Generate a typed identity provider from a manifest's principal
+    /// contract (the `principal.*` attributes the policies require).
+    GenIdentity {
+        /// Path to a compiled manifest.json.
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Target language: rust | scala.
+        #[arg(long, default_value = "rust")]
+        lang: String,
+        /// Write to a file instead of stdout.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -149,6 +195,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             compile_to_file(files, output.as_deref(), cli.verbose)
         }
         (Some(Commands::Uc { op }), _) => run_uc(op, cli.verbose),
+        (
+            Some(Commands::New {
+                profile,
+                id,
+                table,
+                target_tag,
+                column,
+                tag,
+                role,
+                description,
+                output,
+            }),
+            _,
+        ) => run_new(
+            profile,
+            id.clone(),
+            table.clone(),
+            target_tag.clone(),
+            column.clone(),
+            tag.clone(),
+            role.clone(),
+            description.clone(),
+            output.as_deref(),
+        ),
+        (Some(Commands::GenIdentity { manifest, lang, output }), _) => {
+            run_gen_identity(manifest, lang, output.as_deref())
+        }
         (None, false) => compile_to_file(&cli.files, cli.output.as_deref(), cli.verbose),
         (None, true) => {
             eprintln!("error: provide Cedar files or a subcommand; see --help");
@@ -187,6 +260,62 @@ fn compile_all(files: &[PathBuf], verbose: bool) -> Result<PolicyManifest, Box<d
         manifest.compile_policies(&parsed)?;
     }
     Ok(manifest)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_new(
+    profile: &str,
+    id: Option<String>,
+    table: Option<String>,
+    target_tag: Option<String>,
+    column: Option<String>,
+    tag: Option<String>,
+    role: Vec<String>,
+    description: Option<String>,
+    output: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let profile_kind = parse_profile_kind(profile)?;
+    let opts = ScaffoldOptions {
+        profile_kind: Some(profile_kind),
+        id,
+        target_table: table,
+        target_tag,
+        column,
+        applies_to_tag: tag,
+        roles: role,
+        description,
+    };
+    let cedar = render_scaffold(&opts)?;
+    if let Some(out) = output {
+        std::fs::write(out, &cedar)?;
+        eprintln!("Wrote {} profile scaffold to {}", profile, out.display());
+    } else {
+        print!("{cedar}");
+    }
+    Ok(())
+}
+
+fn run_gen_identity(
+    manifest_path: &Path,
+    lang: &str,
+    output: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let lang = IdentityLang::parse(lang)
+        .ok_or_else(|| format!("unknown --lang {lang:?}; expected: rust | scala"))?;
+    let json = std::fs::read_to_string(manifest_path)?;
+    let manifest = PolicyManifest::from_json(&json)?;
+    let contract = manifest
+        .principal_contract
+        .clone()
+        .unwrap_or_else(PrincipalContract::default);
+    let code = render_identity(lang, &contract);
+    if let Some(out) = output {
+        std::fs::write(out, &code)?;
+        eprintln!("Wrote generated identity to {}", out.display());
+    } else {
+        print!("{code}");
+    }
+    Ok(())
 }
 
 fn run_uc(op: &UcOp, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -529,6 +658,63 @@ mod tests {
         std::fs::write(&after, serde_json::to_string(&r2).unwrap()).unwrap();
 
         uc_diff(&before, &after).unwrap();
+    }
+
+    #[test]
+    fn test_run_new_writes_scaffold_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("rf.cedar");
+        run_new(
+            "row-filter",
+            Some("rf".into()),
+            Some("patients".into()),
+            None,
+            None,
+            None,
+            vec!["analyst".into()],
+            None,
+            Some(&out),
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&out).unwrap();
+        assert!(text.contains("@id(\"rf\")"));
+        assert!(text.contains("@filter_type(\"row_filter\")"));
+    }
+
+    #[test]
+    fn test_run_new_rejects_unknown_profile() {
+        assert!(run_new(
+            "nope",
+            None,
+            None,
+            None,
+            None,
+            None,
+            vec![],
+            None,
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn test_run_gen_identity_writes_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("manifest.json");
+        let manifest = PolicyManifest {
+            version: "1.0".into(),
+            policies: vec![],
+            principal_contract: Some(PrincipalContract {
+                required_attributes: vec!["role".into(), "region".into()],
+            }),
+        };
+        std::fs::write(&manifest_path, manifest.to_json().unwrap()).unwrap();
+
+        let out = dir.path().join("identity.rs");
+        run_gen_identity(&manifest_path, "rust", Some(&out)).unwrap();
+        let code = std::fs::read_to_string(&out).unwrap();
+        assert!(code.contains("pub struct GeneratedIdentity"));
+        assert!(code.contains("pub role: Option<String>,"));
     }
 
     #[test]
