@@ -95,6 +95,7 @@ fn full_manifest() -> PolicyManifest {
                 description: None,
             },
         ],
+        principal_contract: None,
     }
 }
 
@@ -157,6 +158,7 @@ async fn test_admin_sees_all_rows_unmasked() {
             applies_to: None,
             description: None,
         }],
+        principal_contract: None,
     };
 
     let identity = QueryIdentity {
@@ -203,6 +205,7 @@ async fn test_legal_user_sees_legal_hold_rows() {
             applies_to: None,
             description: None,
         }],
+        principal_contract: None,
     };
 
     let identity = QueryIdentity {
@@ -245,6 +248,7 @@ async fn test_deny_override_blocks_legal_hold() {
             applies_to: None,
             description: None,
         }],
+        principal_contract: None,
     };
 
     let identity = QueryIdentity {
@@ -284,6 +288,7 @@ async fn test_no_policies_means_no_governance() {
     let manifest = PolicyManifest {
         version: "1.0".into(),
         policies: vec![],
+        principal_contract: None,
     };
 
     let identity = QueryIdentity {
@@ -327,6 +332,7 @@ async fn test_column_mask_with_select_star() {
             applies_to: None,
             description: None,
         }],
+        principal_contract: None,
     };
 
     let identity = QueryIdentity {

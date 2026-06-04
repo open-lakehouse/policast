@@ -70,4 +70,20 @@ class PolicyManifestSpec extends AnyFunSuite with Matchers {
     val reloaded = PolicyManifest.fromJson(json)
     reloaded.policies.size() shouldBe manifest.policies.size()
   }
+
+  test("requiredPrincipalAttributes is empty when principal_contract is absent") {
+    val manifest = PolicyManifest.fromJson(sampleJson)
+    manifest.requiredPrincipalAttributes shouldBe empty
+  }
+
+  test("principal_contract is parsed when present") {
+    val json =
+      """{
+        |  "version": "1.0",
+        |  "policies": [],
+        |  "principal_contract": { "required_attributes": ["region", "role"] }
+        |}""".stripMargin
+    val manifest = PolicyManifest.fromJson(json)
+    manifest.requiredPrincipalAttributes shouldBe Seq("region", "role")
+  }
 }

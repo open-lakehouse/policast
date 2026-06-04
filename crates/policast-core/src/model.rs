@@ -26,6 +26,26 @@ pub struct AppliesTo {
     pub principals: Vec<String>,
 }
 
+/// The compile-time "footprint" of the principal across a policy set: the
+/// set of `principal.<attr>` attributes every policy references.
+///
+/// This is the contract an identity provider must satisfy to evaluate the
+/// manifest. The compiler derives it by walking each policy's conditions;
+/// the `policast gen-identity` command turns it into a typed identity
+/// struct. All attributes are string-valued in this version.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrincipalContract {
+    /// Sorted, de-duplicated attribute names (e.g. `["name", "region", "role"]`).
+    #[serde(default)]
+    pub required_attributes: Vec<String>,
+}
+
+impl PrincipalContract {
+    pub fn is_empty(&self) -> bool {
+        self.required_attributes.is_empty()
+    }
+}
+
 /// A single compiled policy rule: the Cedar source has been parsed and its
 /// condition expressions translated into a portable CEL string.
 ///

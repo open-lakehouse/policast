@@ -15,7 +15,8 @@ use datafusion::physical_plan::{ExecutionPlan, PhysicalExpr};
 
 use policast_core::PolicyManifest;
 
-use crate::cel_filter::{build_column_masks, build_row_filters, QueryIdentity};
+use crate::cel_filter::{build_column_masks, build_row_filters};
+use crate::identity::PrincipalProvider;
 
 /// A governance-aware table wrapper that injects row-level filters
 /// and column masks derived from compiled Cedar/CEL policies.
@@ -26,15 +27,40 @@ pub struct GovernedTable {
     inner: Arc<dyn TableProvider>,
     manifest: PolicyManifest,
     table_name: String,
-    identity: QueryIdentity,
+    identity: Arc<dyn PrincipalProvider>,
 }
 
 impl GovernedTable {
+    /// Wrap a table provider with governance enforcement for `identity`.
+    ///
+    /// `identity` accepts any [`PrincipalProvider`] — a
+    /// [`QueryIdentity`](crate::cel_filter::QueryIdentity), an
+    /// [`AttrIdentity`](crate::identity::AttrIdentity), or a custom
+    /// bridge to an existing identity system.
     pub fn new(
         inner: Arc<dyn TableProvider>,
         manifest: PolicyManifest,
         table_name: impl Into<String>,
-        identity: QueryIdentity,
+        identity: impl PrincipalProvider + 'static,
+    ) -> Self {
+        Self {
+            inner,
+            manifest,
+            table_name: table_name.into(),
+            identity: Arc::new(identity),
+        }
+    }
+
+    /// Wrap a table provider with an already-shared `PrincipalProvider`.
+    ///
+    /// Useful when the same identity is reused across many governed tables
+    /// (e.g. one identity per query session) and you want to avoid
+    /// re-allocating it for each wrapper.
+    pub fn with_shared_identity(
+        inner: Arc<dyn TableProvider>,
+        manifest: PolicyManifest,
+        table_name: impl Into<String>,
+        identity: Arc<dyn PrincipalProvider>,
     ) -> Self {
         Self {
             inner,
@@ -46,7 +72,7 @@ impl GovernedTable {
 
     /// Returns the list of (column, mask_value) pairs that should be applied.
     pub fn masked_columns(&self) -> Vec<(String, String)> {
-        build_column_masks(&self.manifest, &self.table_name, &self.identity)
+        build_column_masks(&self.manifest, &self.table_name, self.identity.as_ref())
     }
 }
 
@@ -54,7 +80,7 @@ impl std::fmt::Debug for GovernedTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GovernedTable")
             .field("table_name", &self.table_name)
-            .field("identity_role", &self.identity.role)
+            .field("identity_role", &self.identity.attribute("role"))
             .finish()
     }
 }
@@ -84,7 +110,7 @@ impl TableProvider for GovernedTable {
         limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
         let governance_filters =
-            build_row_filters(&self.manifest, &self.table_name, &self.identity)?;
+            build_row_filters(&self.manifest, &self.table_name, self.identity.as_ref())?;
 
         // Pass user-provided filters to the inner provider (it can push them
         // down if it supports them). Governance filters are applied as a
@@ -93,7 +119,7 @@ impl TableProvider for GovernedTable {
 
         let plan = apply_governance_filters(state, inner_plan, &governance_filters)?;
 
-        let masks = build_column_masks(&self.manifest, &self.table_name, &self.identity);
+        let masks = build_column_masks(&self.manifest, &self.table_name, self.identity.as_ref());
         if masks.is_empty() {
             return Ok(plan);
         }
@@ -171,6 +197,8 @@ fn apply_column_masks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cel_filter::QueryIdentity;
+    use crate::identity::AttrIdentity;
     use policast_core::model::{CompiledPolicy, Effect, FilterType};
     use policast_core::PolicyManifest;
 
@@ -189,6 +217,7 @@ mod tests {
                 applies_to: None,
                 description: None,
             }],
+            principal_contract: None,
         }
     }
 
@@ -210,6 +239,7 @@ mod tests {
                 applies_to: None,
                 description: None,
             }],
+            principal_contract: None,
         };
         let identity = QueryIdentity {
             role: "analyst".into(),
@@ -225,6 +255,36 @@ mod tests {
         let masks = governed.masked_columns();
         assert_eq!(masks.len(), 1);
         assert_eq!(masks[0].0, "ssn");
+    }
+
+    /// A fully dynamic `AttrIdentity` should drive masking identically to a
+    /// `QueryIdentity`: an admin carved out by role sees no mask.
+    #[test]
+    fn test_masked_columns_with_attr_identity() {
+        let manifest = PolicyManifest {
+            version: "1.0".into(),
+            policies: vec![CompiledPolicy {
+                id: "mask_ssn".into(),
+                effect: Effect::Forbid,
+                filter_type: FilterType::ColumnMask,
+                target_table: "patients".into(),
+                column: Some("ssn".into()),
+                target_tag: None,
+                applies_to_tag: None,
+                cel_expression:
+                    "(resource.table_name == \"patients\") && !((principal.role == \"admin\") || (principal.role == \"physician\"))"
+                        .into(),
+                applies_to: None,
+                description: None,
+            }],
+            principal_contract: None,
+        };
+        let identity = AttrIdentity::new().with("role", "admin");
+        let governed = GovernedTable::new(Arc::new(DummyProvider), manifest, "patients", identity);
+        assert!(
+            governed.masked_columns().is_empty(),
+            "admin (via AttrIdentity) should not be masked"
+        );
     }
 
     struct DummyProvider;

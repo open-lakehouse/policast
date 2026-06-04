@@ -189,6 +189,7 @@ pub fn bundle_to_resolved(bundle: ResolveBundle) -> ResolvedPolicies {
         manifest: PolicyManifest {
             version: bundle.compiled_manifest.version,
             policies: bundle.compiled_manifest.policies,
+            principal_contract: bundle.compiled_manifest.principal_contract,
         },
         identity_claims: bundle.identity_claims,
         bindings_applied: bundle.bindings_applied,

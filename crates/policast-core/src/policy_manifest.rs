@@ -1,15 +1,26 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::cedar_parser::{ConditionKind, ParsedPolicy};
-use crate::cel_emitter::cedar_expr_to_cel;
+use crate::cel_emitter::{cedar_expr_to_cel, collect_principal_attrs};
 use crate::error::PolicastError;
-use crate::model::{AppliesTo, CompiledPolicy, Effect, FilterType};
+use crate::model::{AppliesTo, CompiledPolicy, Effect, FilterType, PrincipalContract};
+use crate::profile::{
+    non_canonical_principal_attrs, validate_profile, PolicyProfile, CANONICAL_PRINCIPAL_ATTRS,
+};
 
 /// A versioned manifest of compiled policies, portable as JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyManifest {
     pub version: String,
     pub policies: Vec<CompiledPolicy>,
+    /// Compile-time footprint of the `principal.*` attributes referenced
+    /// across all policies. `None` when no policy references the principal
+    /// (keeps the JSON identical to pre-footprint manifests for older
+    /// consumers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal_contract: Option<PrincipalContract>,
 }
 
 impl PolicyManifest {
@@ -17,6 +28,7 @@ impl PolicyManifest {
         Self {
             version: "1.0".to_string(),
             policies: Vec::new(),
+            principal_contract: None,
         }
     }
 
@@ -25,16 +37,40 @@ impl PolicyManifest {
     /// Each policy's `when`/`unless` conditions are translated to CEL
     /// expressions. The `filter_type` and `target_table` are inferred from
     /// annotations on the Cedar policy (e.g. `@filter_type("row_filter")`
-    /// and `@target_table("patients")`).
+    /// and `@target_table("patients")`). The `principal_contract` footprint
+    /// is recomputed across all policies after each batch.
     pub fn compile_policies(
         &mut self,
         parsed: &[ParsedPolicy],
     ) -> Result<(), PolicastError> {
+        let mut principal_attrs: BTreeSet<String> =
+            self.collected_principal_attrs();
+
         for policy in parsed {
             let compiled = compile_single_policy(policy)?;
+            for cond in &policy.conditions {
+                principal_attrs.extend(collect_principal_attrs(&cond.body));
+            }
             self.policies.push(compiled);
         }
+
+        self.principal_contract = if principal_attrs.is_empty() {
+            None
+        } else {
+            Some(PrincipalContract {
+                required_attributes: principal_attrs.into_iter().collect(),
+            })
+        };
         Ok(())
+    }
+
+    /// The principal attributes already recorded on this manifest, used as
+    /// the accumulator seed when compiling further batches of policies.
+    fn collected_principal_attrs(&self) -> BTreeSet<String> {
+        self.principal_contract
+            .as_ref()
+            .map(|c| c.required_attributes.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     pub fn to_json(&self) -> Result<String, PolicastError> {
@@ -143,6 +179,35 @@ fn compile_single_policy(policy: &ParsedPolicy) -> Result<CompiledPolicy, Polica
             ConditionKind::When => when_parts.push(cel),
             ConditionKind::Unless => unless_parts.push(cel),
         }
+    }
+
+    // Validate the policy against the shape of its profile. Structural
+    // contradictions are hard errors; advisory warnings (e.g. a missing
+    // `when` guard or a non-canonical principal attribute) go to stderr.
+    let profile = PolicyProfile::from_filter_type(&filter_type);
+    let warnings = validate_profile(
+        &policy.id,
+        profile,
+        effect,
+        when_parts.len(),
+        unless_parts.len(),
+        column.is_some(),
+        applies_to_tag.is_some(),
+    )?;
+    for warning in warnings {
+        eprintln!("policast: {warning}");
+    }
+
+    let mut referenced_principal_attrs = std::collections::BTreeSet::new();
+    for cond in &policy.conditions {
+        referenced_principal_attrs.extend(collect_principal_attrs(&cond.body));
+    }
+    for attr in non_canonical_principal_attrs(&referenced_principal_attrs) {
+        eprintln!(
+            "policast: policy {:?} references non-canonical principal attribute `{attr}` (canonical: {})",
+            policy.id,
+            CANONICAL_PRINCIPAL_ATTRS.join(", ")
+        );
     }
 
     // Build the final CEL expression:
@@ -437,6 +502,119 @@ mod tests {
         assert_eq!(p.filter_type, FilterType::DenyOverride);
         assert!(p.cel_expression.contains("resource.legal_hold"));
         assert!(p.cel_expression.contains("!("));
+    }
+
+    /// Compiling policies records the union of referenced principal
+    /// attributes into `principal_contract`, sorted and de-duplicated.
+    #[test]
+    fn test_principal_contract_footprint() {
+        let cedar = r#"
+            @id("region")
+            @filter_type("row_filter")
+            @target_table("patients")
+            permit (principal, action, resource)
+            when { resource.region == principal.region };
+
+            @id("physician")
+            @filter_type("row_filter")
+            @target_table("patients")
+            permit (principal, action, resource)
+            when { resource.treating_physician == principal.name };
+
+            @id("mask")
+            @filter_type("column_mask")
+            @applies_to_tag("pii")
+            forbid (principal, action, resource)
+            unless { principal.role == "admin" };
+        "#;
+
+        let parsed = parse_policies(cedar).unwrap();
+        let mut manifest = PolicyManifest::new();
+        manifest.compile_policies(&parsed).unwrap();
+
+        let contract = manifest
+            .principal_contract
+            .expect("contract should be populated");
+        assert_eq!(
+            contract.required_attributes,
+            vec!["name".to_string(), "region".to_string(), "role".to_string()]
+        );
+    }
+
+    /// A policy set that never references the principal leaves the
+    /// contract unset, so the JSON matches pre-footprint manifests.
+    #[test]
+    fn test_principal_contract_absent_when_unreferenced() {
+        let cedar = r#"
+            @id("amount")
+            @target_table("orders")
+            permit (principal, action, resource)
+            when { resource.amount > 0 };
+        "#;
+
+        let parsed = parse_policies(cedar).unwrap();
+        let mut manifest = PolicyManifest::new();
+        manifest.compile_policies(&parsed).unwrap();
+
+        assert!(manifest.principal_contract.is_none());
+        let json = manifest.to_json().unwrap();
+        assert!(!json.contains("principal_contract"));
+    }
+
+    /// The contract accumulates across successive `compile_policies` calls.
+    #[test]
+    fn test_principal_contract_accumulates_across_batches() {
+        let mut manifest = PolicyManifest::new();
+        manifest
+            .compile_policies(
+                &parse_policies(
+                    r#"@id("a") @target_table("t")
+                       permit (principal, action, resource)
+                       when { resource.region == principal.region };"#,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        manifest
+            .compile_policies(
+                &parse_policies(
+                    r#"@id("b") @target_table("t")
+                       permit (principal, action, resource)
+                       when { resource.x == principal.clearance };"#,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let contract = manifest.principal_contract.unwrap();
+        assert_eq!(
+            contract.required_attributes,
+            vec!["clearance".to_string(), "region".to_string()]
+        );
+    }
+
+    /// The contract survives the JSON roundtrip.
+    #[test]
+    fn test_principal_contract_json_roundtrip() {
+        let cedar = r#"
+            @id("region")
+            @target_table("patients")
+            permit (principal, action, resource)
+            when { resource.region == principal.region };
+        "#;
+        let parsed = parse_policies(cedar).unwrap();
+        let mut manifest = PolicyManifest::new();
+        manifest.compile_policies(&parsed).unwrap();
+
+        let json = manifest.to_json().unwrap();
+        assert!(json.contains("\"principal_contract\""));
+        assert!(json.contains("\"region\""));
+
+        let reloaded = PolicyManifest::from_json(&json).unwrap();
+        assert_eq!(
+            reloaded.principal_contract.unwrap().required_attributes,
+            vec!["region".to_string()]
+        );
     }
 
     #[test]

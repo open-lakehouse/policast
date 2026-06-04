@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde_json::Value;
 
 use crate::error::PolicastError;
@@ -30,6 +32,59 @@ pub fn cedar_expr_to_cel(expr: &Value) -> Result<String, PolicastError> {
         other => Err(PolicastError::CelEmit(format!(
             "Unsupported Cedar EST node: {other}"
         ))),
+    }
+}
+
+/// Collect the set of `principal.<attr>` attribute names referenced
+/// anywhere in a Cedar EST condition body.
+///
+/// This is the compile-time "footprint" of the principal: the attributes
+/// an identity provider must supply for the policy to evaluate. It walks
+/// every node, recording the `attr` of any attribute-access (`.`) or
+/// existence-check (`has`) node whose left operand is the `principal`
+/// variable (e.g. `principal.role`, `principal.region`, `has(principal.x)`).
+pub fn collect_principal_attrs(expr: &Value) -> BTreeSet<String> {
+    let mut attrs = BTreeSet::new();
+    walk_principal_attrs(expr, &mut attrs);
+    attrs
+}
+
+fn walk_principal_attrs(expr: &Value, attrs: &mut BTreeSet<String>) {
+    match expr {
+        Value::Object(map) => {
+            for (key, val) in map {
+                if matches!(key.as_str(), "." | "has") {
+                    if let Some(attr) = principal_attr_access(val) {
+                        attrs.insert(attr);
+                    }
+                }
+                walk_principal_attrs(val, attrs);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                walk_principal_attrs(item, attrs);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// If `val` is the operand of a `.`/`has` node accessing an attribute
+/// directly on the `principal` variable, return the attribute name.
+fn principal_attr_access(val: &Value) -> Option<String> {
+    let obj = val.as_object()?;
+    let attr = obj.get("attr")?.as_str()?;
+    let left = obj.get("left")?;
+    let is_principal = left
+        .get("Var")
+        .and_then(|v| v.as_str())
+        .map(|v| v == "principal")
+        .unwrap_or(false);
+    if is_principal {
+        Some(attr.to_string())
+    } else {
+        None
     }
 }
 
@@ -380,5 +435,50 @@ mod tests {
         }});
         let result = cedar_expr_to_cel(&expr).unwrap();
         assert_eq!(result, "(resource.region == principal.region)");
+    }
+
+    #[test]
+    fn test_collect_principal_attrs_basic() {
+        let expr = json!({"==": {
+            "left": {".": {"left": {"Var": "resource"}, "attr": "region"}},
+            "right": {".": {"left": {"Var": "principal"}, "attr": "region"}}
+        }});
+        let attrs = collect_principal_attrs(&expr);
+        assert_eq!(attrs.len(), 1);
+        assert!(attrs.contains("region"));
+    }
+
+    #[test]
+    fn test_collect_principal_attrs_multiple_and_dedup() {
+        // (principal.role == "admin") || (principal.role == "physician")
+        let expr = json!({"||": {
+            "left": {"==": {
+                "left": {".": {"left": {"Var": "principal"}, "attr": "role"}},
+                "right": {"Value": "admin"}
+            }},
+            "right": {"==": {
+                "left": {".": {"left": {"Var": "principal"}, "attr": "role"}},
+                "right": {"Value": "physician"}
+            }}
+        }});
+        let attrs = collect_principal_attrs(&expr);
+        assert_eq!(attrs.len(), 1, "duplicate role refs collapse to one");
+        assert!(attrs.contains("role"));
+    }
+
+    #[test]
+    fn test_collect_principal_attrs_ignores_resource() {
+        let expr = json!({"==": {
+            "left": {".": {"left": {"Var": "resource"}, "attr": "legal_hold"}},
+            "right": {"Value": true}
+        }});
+        assert!(collect_principal_attrs(&expr).is_empty());
+    }
+
+    #[test]
+    fn test_collect_principal_attrs_has_operator() {
+        let expr = json!({"has": {"left": {"Var": "principal"}, "attr": "groups"}});
+        let attrs = collect_principal_attrs(&expr);
+        assert!(attrs.contains("groups"));
     }
 }

@@ -56,5 +56,12 @@
       },
       "description": "Restrict physicians to their own patients"
     }
-  ]
+  ],
+  "principal_contract": {
+    "required_attributes": [
+      "name",
+      "region",
+      "role"
+    ]
+  }
 }

@@ -136,6 +136,10 @@ impl ResolverCore {
         let manifest = PolicyManifest {
             version: "1.0".into(),
             policies: expanded_policies,
+            // The flat-file store resolves from compiled CEL rows rather
+            // than Cedar EST, so the principal footprint is not recomputed
+            // on this path; it stays unset (optional, backwards-compatible).
+            principal_contract: None,
         };
 
         let identity_claims = identity_claims_for(&req.principal);
