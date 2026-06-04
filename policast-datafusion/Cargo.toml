@@ -13,8 +13,8 @@ uc    = ["dep:policast-uc", "policast-uc/client"]
 [dependencies]
 policast-core = { path = "../policast-core" }
 policast-uc   = { path = "../policast-uc", optional = true, default-features = false }
-datafusion = "46"
-deltalake = { version = "0.25", features = ["datafusion"], optional = true }
+datafusion = "53"
+deltalake = { version = "0.32.3", features = ["datafusion"], optional = true }
 cel-interpreter = "0.8"
 cel-parser = "0.7"
 serde = { version = "1", features = ["derive"] }

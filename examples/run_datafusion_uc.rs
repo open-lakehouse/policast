@@ -18,6 +18,7 @@ use datafusion::arrow::array::{BooleanArray, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::prelude::*;
+use deltalake::kernel::engine::arrow_conversion::TryIntoKernel;
 use deltalake::operations::create::CreateBuilder;
 use deltalake::operations::write::WriteBuilder;
 
@@ -192,12 +193,13 @@ async fn seed_patients_delta(uri: &str) -> Result<(), Box<dyn std::error::Error>
             ])),
         ],
     )?;
-    let delta_schema: deltalake::kernel::Schema = schema.as_ref().try_into()?;
+    let delta_schema: deltalake::kernel::Schema = schema.as_ref().try_into_kernel()?;
     let table = CreateBuilder::new()
         .with_location(uri)
         .with_columns(delta_schema.fields().cloned())
         .await?;
-    WriteBuilder::new(table.log_store(), table.state.clone())
+    // deltalake 0.32: WriteBuilder::new takes `Option<EagerSnapshot>`.
+    WriteBuilder::new(table.log_store(), Some(table.snapshot()?.snapshot().clone()))
         .with_input_batches(vec![batch])
         .await?;
     Ok(())

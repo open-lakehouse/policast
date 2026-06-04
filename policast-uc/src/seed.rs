@@ -22,9 +22,10 @@ use datafusion::arrow::array::{
 };
 use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
+use deltalake::kernel::engine::arrow_conversion::TryIntoKernel;
 use deltalake::operations::create::CreateBuilder;
 use deltalake::operations::write::WriteBuilder;
-use deltalake::{kernel::StructType, DeltaTableError};
+use deltalake::{ensure_table_uri, kernel::StructType, DeltaTableError};
 
 use crate::backend::{BindingRow, ManifestRow, PolicyRow, ResolveBackend, TagRow};
 use crate::error::UcError;
@@ -135,14 +136,16 @@ async fn write_table(
 ) -> Result<(), UcError> {
     let uri = cfg.table_uri(name);
     let arrow_schema = batch.schema();
-    let delta_schema: StructType = arrow_schema.as_ref().try_into().map_err(|e| {
+    let delta_schema: StructType = arrow_schema.as_ref().try_into_kernel().map_err(|e| {
         UcError::Config(format!(
             "seed: arrow->delta schema conversion failed for {name}: {e}"
         ))
     })?;
 
     // Try to open first. If it exists, either fail loudly or append.
-    match deltalake::open_table_with_storage_options(&uri, cfg.storage_options.clone()).await {
+    let table_url = ensure_table_uri(&uri)
+        .map_err(|e| UcError::Config(format!("seed: bad uri `{uri}`: {e}")))?;
+    match deltalake::open_table_with_storage_options(table_url, cfg.storage_options.clone()).await {
         Ok(table) => {
             if !cfg.overwrite_existing {
                 return Err(UcError::Config(format!(
@@ -151,7 +154,14 @@ async fn write_table(
                      publish a new snapshot on top"
                 )));
             }
-            WriteBuilder::new(table.log_store(), table.state.clone())
+            // deltalake 0.32: WriteBuilder::new takes the table's
+            // `Option<EagerSnapshot>` rather than `Option<DeltaTableState>`.
+            let eager = table
+                .snapshot()
+                .map_err(|e| UcError::Config(format!("seed: snapshot `{uri}` failed: {e}")))?
+                .snapshot()
+                .clone();
+            WriteBuilder::new(table.log_store(), Some(eager))
                 .with_input_batches(vec![batch])
                 .await
                 .map_err(|e| {
@@ -171,7 +181,12 @@ async fn write_table(
                         "seed: create `{uri}` failed: {e}"
                     ))
                 })?;
-            WriteBuilder::new(table.log_store(), table.state.clone())
+            let eager = table
+                .snapshot()
+                .map_err(|e| UcError::Config(format!("seed: snapshot `{uri}` failed: {e}")))?
+                .snapshot()
+                .clone();
+            WriteBuilder::new(table.log_store(), Some(eager))
                 .with_input_batches(vec![batch])
                 .await
                 .map_err(|e| {

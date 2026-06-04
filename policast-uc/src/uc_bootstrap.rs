@@ -49,10 +49,11 @@ use datafusion::arrow::array::{
     Array, AsArray, Int32Array, Int64Array, ListArray, StringArray,
     TimestampMicrosecondArray,
 };
-use datafusion::arrow::datatypes::{DataType, TimeUnit};
+use datafusion::arrow::compute::cast;
+use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::prelude::SessionContext;
-use deltalake::open_table_with_storage_options;
+use deltalake::{ensure_table_uri, open_table_with_storage_options};
 use reqwest::StatusCode;
 
 use crate::backend::{BindingRow, ManifestRow, PolicyRow, ResolveBackend, TagRow};
@@ -562,7 +563,10 @@ async fn scan_delta_table(
     uri: &str,
     storage_options: &HashMap<String, String>,
 ) -> Result<Vec<RecordBatch>, UcError> {
-    let table = open_table_with_storage_options(uri, storage_options.clone())
+    // deltalake 0.32 takes a parsed `Url`; normalize the path/URI first.
+    let table_url =
+        ensure_table_uri(uri).map_err(|e| UcError::Config(format!("open {uri}: {e}")))?;
+    let table = open_table_with_storage_options(table_url, storage_options.clone())
         .await
         .map_err(|e| UcError::Config(format!("open {uri}: {e}")))?;
 
@@ -572,15 +576,88 @@ async fn scan_delta_table(
     // beyond the schema mapping in the `arrow_to_*` helpers.
     let ctx = SessionContext::new();
     let table_alias = "t";
-    ctx.register_table(table_alias, Arc::new(table))
+    // deltalake 0.32: `DeltaTable` no longer implements `TableProvider`; build
+    // one from its log store + snapshot before registering it.
+    let provider = table
+        .table_provider()
+        .build()
+        .await
+        .map_err(|e| UcError::Config(format!("provider {uri}: {e}")))?;
+    ctx.register_table(table_alias, Arc::new(provider))
         .map_err(|e| UcError::Config(format!("register {uri}: {e}")))?;
     let df = ctx
         .sql(&format!("SELECT * FROM {table_alias}"))
         .await
         .map_err(|e| UcError::Config(format!("sql {uri}: {e}")))?;
-    df.collect()
+    let batches = df
+        .collect()
         .await
-        .map_err(|e| UcError::Config(format!("collect {uri}: {e}")))
+        .map_err(|e| UcError::Config(format!("collect {uri}: {e}")))?;
+
+    // datafusion 53 / arrow 58 read string (and binary) columns as the newer
+    // "view" layouts (`Utf8View` / `BinaryView`) by default. The row mappers
+    // below downcast to the classic `Utf8` arrays, so normalize view types
+    // back to their non-view equivalents once, here, rather than teaching
+    // every extractor about both layouts.
+    batches
+        .into_iter()
+        .map(coerce_view_types)
+        .collect::<Result<Vec<_>, _>>()
+}
+
+/// Cast any `Utf8View`/`BinaryView` columns (including those nested inside a
+/// `List`) back to `Utf8`/`Binary` so the classic `as_string::<i32>()` style
+/// downcasts in the row mappers keep working under arrow 58.
+fn coerce_view_types(batch: RecordBatch) -> Result<RecordBatch, UcError> {
+    let schema = batch.schema();
+    if !schema
+        .fields()
+        .iter()
+        .any(|f| contains_view_type(f.data_type()))
+    {
+        return Ok(batch);
+    }
+
+    let fields: Vec<Field> = schema
+        .fields()
+        .iter()
+        .map(|f| Field::new(f.name(), downgrade_view_type(f.data_type()), f.is_nullable()))
+        .collect();
+    let target = Arc::new(Schema::new(fields));
+
+    let columns = batch
+        .columns()
+        .iter()
+        .zip(target.fields())
+        .map(|(col, field)| {
+            cast(col, field.data_type())
+                .map_err(|e| UcError::Config(format!("coerce view types: {e}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    RecordBatch::try_new(target, columns)
+        .map_err(|e| UcError::Config(format!("coerce view types: {e}")))
+}
+
+fn contains_view_type(dt: &DataType) -> bool {
+    match dt {
+        DataType::Utf8View | DataType::BinaryView => true,
+        DataType::List(field) => contains_view_type(field.data_type()),
+        _ => false,
+    }
+}
+
+fn downgrade_view_type(dt: &DataType) -> DataType {
+    match dt {
+        DataType::Utf8View => DataType::Utf8,
+        DataType::BinaryView => DataType::Binary,
+        DataType::List(field) => DataType::List(Arc::new(Field::new(
+            field.name(),
+            downgrade_view_type(field.data_type()),
+            field.is_nullable(),
+        ))),
+        other => other.clone(),
+    }
 }
 
 fn flatten_batches<R, F>(batches: &[RecordBatch], convert: F) -> Result<Vec<R>, UcError>
@@ -927,6 +1004,7 @@ mod tests {
         ArrayRef,
     };
     use datafusion::arrow::datatypes::{Field, Schema};
+    use deltalake::kernel::engine::arrow_conversion::TryIntoKernel;
     use deltalake::operations::create::CreateBuilder;
     use deltalake::operations::write::WriteBuilder;
     use tempfile::TempDir;
@@ -983,13 +1061,17 @@ mod tests {
     }
 
     async fn write_delta(uri: &str, schema: Arc<Schema>, batch: RecordBatch) {
-        let delta_schema: deltalake::kernel::Schema = schema.as_ref().try_into().unwrap();
+        let delta_schema: deltalake::kernel::Schema =
+            schema.as_ref().try_into_kernel().unwrap();
         let table = CreateBuilder::new()
             .with_location(uri)
             .with_columns(delta_schema.fields().cloned())
             .await
             .unwrap();
-        WriteBuilder::new(table.log_store(), table.state.clone())
+        WriteBuilder::new(
+            table.log_store(),
+            Some(table.snapshot().unwrap().snapshot().clone()),
+        )
             .with_input_batches(vec![batch])
             .await
             .unwrap();
@@ -1380,13 +1462,19 @@ mod tests {
         )
         .unwrap();
         let tags_uri = dir.path().join("tags");
-        let existing = open_table_with_storage_options(tags_uri.to_str().unwrap(), HashMap::new())
-            .await
-            .unwrap();
-        WriteBuilder::new(existing.log_store(), existing.state.clone())
-            .with_input_batches(vec![append_batch])
-            .await
-            .unwrap();
+        let existing = open_table_with_storage_options(
+            ensure_table_uri(tags_uri.to_str().unwrap()).unwrap(),
+            HashMap::new(),
+        )
+        .await
+        .unwrap();
+        WriteBuilder::new(
+            existing.log_store(),
+            Some(existing.snapshot().unwrap().snapshot().clone()),
+        )
+        .with_input_batches(vec![append_batch])
+        .await
+        .unwrap();
 
         backend.refresh_snapshot().await.unwrap();
         let tags = backend.tags().await.unwrap();
@@ -1467,14 +1555,19 @@ mod tests {
         )
         .unwrap();
         let tags_uri = dir.path().join("tags");
-        let existing =
-            open_table_with_storage_options(tags_uri.to_str().unwrap(), HashMap::new())
-                .await
-                .unwrap();
-        WriteBuilder::new(existing.log_store(), existing.state.clone())
-            .with_input_batches(vec![append_batch])
-            .await
-            .unwrap();
+        let existing = open_table_with_storage_options(
+            ensure_table_uri(tags_uri.to_str().unwrap()).unwrap(),
+            HashMap::new(),
+        )
+        .await
+        .unwrap();
+        WriteBuilder::new(
+            existing.log_store(),
+            Some(existing.snapshot().unwrap().snapshot().clone()),
+        )
+        .with_input_batches(vec![append_batch])
+        .await
+        .unwrap();
 
         // Poll up to 3s for the refresh to land — 60x the interval so
         // CI flakiness from a slow Delta scan does not bite us.
