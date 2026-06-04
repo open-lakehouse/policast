@@ -40,11 +40,12 @@ tower-http = { version = "0.5", features = ["trace"], optional = true }
 clap       = { version = "4", features = ["derive"], optional = true }
 
 # UC bootstrap backend dependencies (gated by `uc-bootstrap` feature).
-# Matches the `deltalake 0.25` / `datafusion 46` pinning used by
-# `policast-datafusion`; see the revert in commit 7f84d9b for the
-# conflict story with `deltalake 0.31` + `datafusion 52`.
-deltalake  = { version = "0.25", features = ["datafusion"], optional = true }
-datafusion = { version = "46", optional = true }
+# Must stay pinned to the same `deltalake` / `datafusion` versions as
+# `policast-datafusion`: deltalake-core's transitive `chrono` pin is exact,
+# so a mismatched deltalake anywhere in the workspace (even behind an
+# optional feature) makes the lockfile unresolvable.
+deltalake  = { version = "0.32.3", features = ["datafusion"], optional = true }
+datafusion = { version = "53", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -136,7 +136,7 @@ fn not_expr(expr: Expr) -> Expr {
 
 /// For `col = true` produce `col = false OR col IS NULL` (preserving NULLs).
 fn col_eq_lit_negation(left: &Expr, right: &Expr) -> Option<Expr> {
-    if let (Expr::Column(c), Expr::Literal(scalar)) = (left, right) {
+    if let (Expr::Column(c), Expr::Literal(scalar, _)) = (left, right) {
         if let datafusion::common::ScalarValue::Boolean(Some(val)) = scalar {
             let col_ref = col(c.name());
             return Some(col_ref.clone().eq(lit(!val)).or(col_ref.is_null()));
