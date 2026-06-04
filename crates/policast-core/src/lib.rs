@@ -9,4 +9,9 @@ pub use cedar_parser::parse_policies;
 pub use error::PolicastError;
 pub use model::{CompiledPolicy, Effect, FilterType};
 pub use policy_manifest::PolicyManifest;
-pub use policy_store::{FileManifestStore, PolicyQuery, PolicyStore, ResolvedPolicies};
+pub use policy_store::{
+    CacheFailMode, CachedPolicyStore, FileManifestStore, InMemoryCache, PolicyQuery, PolicyStore,
+    ResolvedCache, ResolvedPolicies,
+};
+#[cfg(feature = "redis")]
+pub use policy_store::RedisCache;
