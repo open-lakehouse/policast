@@ -8,7 +8,6 @@ use datafusion::catalog::Session;
 use datafusion::common::Result as DFResult;
 use datafusion::datasource::TableProvider;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType};
-use datafusion::physical_expr::create_physical_expr;
 use datafusion::physical_expr::expressions::{Column, Literal};
 use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::projection::ProjectionExec;
@@ -92,7 +91,7 @@ impl TableProvider for GovernedTable {
         // FilterExec wrapper so they are always enforced.
         let inner_plan = self.inner.scan(state, projection, filters, limit).await?;
 
-        let plan = apply_governance_filters(inner_plan, &governance_filters)?;
+        let plan = apply_governance_filters(state, inner_plan, &governance_filters)?;
 
         let masks = build_column_masks(&self.manifest, &self.table_name, &self.identity);
         if masks.is_empty() {
@@ -104,7 +103,15 @@ impl TableProvider for GovernedTable {
 }
 
 /// Apply governance row filters by wrapping the plan in `FilterExec` nodes.
+///
+/// The physical predicate is built via [`Session::create_physical_expr`] rather
+/// than the bare `create_physical_expr`, so the predicate is type-coerced
+/// against the input schema. This matters for sources whose scan produces
+/// arrow "view" string layouts (`Utf8View`): a `col == "literal"` filter would
+/// otherwise fail at runtime with `Invalid comparison operation: Utf8View ==
+/// Utf8`, since `FilterExec` does not coerce on its own.
 fn apply_governance_filters(
+    state: &dyn Session,
     plan: Arc<dyn ExecutionPlan>,
     filters: &[Expr],
 ) -> DFResult<Arc<dyn ExecutionPlan>> {
@@ -114,11 +121,10 @@ fn apply_governance_filters(
 
     let schema = plan.schema();
     let df_schema = datafusion::common::DFSchema::try_from(schema.as_ref().clone())?;
-    let props = datafusion::execution::context::ExecutionProps::new();
 
     let mut current = plan;
     for filter_expr in filters {
-        let physical_expr = create_physical_expr(filter_expr, &df_schema, &props)?;
+        let physical_expr = state.create_physical_expr(filter_expr.clone(), &df_schema)?;
         current = Arc::new(FilterExec::try_new(physical_expr, current)?);
     }
 

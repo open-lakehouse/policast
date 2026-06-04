@@ -92,10 +92,20 @@ pub async fn wrap_bundle(
             ))
         })?;
 
-    let delta_table = open_table_with_storage_options(&uri, opts.storage_options.clone())
+    // deltalake 0.32's `open_table_with_storage_options` takes a parsed `Url`.
+    let table_url = deltalake::ensure_table_uri(&uri)
+        .map_err(|e| UcError::Resolve(format!("ensure_table_uri {uri}: {e}")))?;
+    let delta_table = open_table_with_storage_options(table_url, opts.storage_options.clone())
         .await
         .map_err(|e| UcError::Resolve(format!("open_table {uri}: {e}")))?;
-    let provider: Arc<dyn TableProvider> = Arc::new(delta_table);
+    // deltalake 0.32 dropped the `TableProvider` impl on `DeltaTable`; build a
+    // provider from its log store + snapshot via the `TableProviderBuilder`.
+    let table_provider = delta_table
+        .table_provider()
+        .build()
+        .await
+        .map_err(|e| UcError::Resolve(format!("table_provider {uri}: {e}")))?;
+    let provider: Arc<dyn TableProvider> = Arc::new(table_provider);
     let identity = identity_from_bundle(&bundle);
 
     let manifest: PolicyManifest = bundle.compiled_manifest;

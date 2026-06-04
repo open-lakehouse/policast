@@ -200,6 +200,7 @@ mod tests {
         };
         use datafusion::arrow::datatypes::{DataType, Field, Schema};
         use datafusion::arrow::record_batch::RecordBatch;
+        use deltalake::kernel::engine::arrow_conversion::TryIntoKernel;
         use deltalake::operations::create::CreateBuilder;
         use deltalake::operations::write::WriteBuilder;
         use std::sync::Arc;
@@ -251,13 +252,17 @@ mod tests {
             Arc::new(b.finish()) as ArrayRef
         }
         async fn write_delta(uri: &str, schema: Arc<Schema>, batch: RecordBatch) {
-            let delta_schema: deltalake::kernel::Schema = schema.as_ref().try_into().unwrap();
+            let delta_schema: deltalake::kernel::Schema =
+                schema.as_ref().try_into_kernel().unwrap();
             let table = CreateBuilder::new()
                 .with_location(uri)
                 .with_columns(delta_schema.fields().cloned())
                 .await
                 .unwrap();
-            WriteBuilder::new(table.log_store(), table.state.clone())
+            WriteBuilder::new(
+                table.log_store(),
+                Some(table.snapshot().unwrap().snapshot().clone()),
+            )
                 .with_input_batches(vec![batch])
                 .await
                 .unwrap();

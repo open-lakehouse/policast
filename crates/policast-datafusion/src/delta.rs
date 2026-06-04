@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use datafusion::datasource::TableProvider;
-use deltalake::open_table;
+use deltalake::{ensure_table_uri, open_table};
 use deltalake::DeltaTable;
 
 use policast_core::PolicyManifest;
@@ -49,22 +49,30 @@ pub async fn open_governed_delta_table(
     table_name: impl Into<String>,
     identity: QueryIdentity,
 ) -> Result<GovernedTable, Box<dyn std::error::Error>> {
-    let delta_table = open_table(table_uri).await?;
-    Ok(wrap_delta_table(delta_table, manifest, table_name, identity))
+    // deltalake 0.32's `open_table` takes a parsed `Url`; `ensure_table_uri`
+    // normalizes local paths into `file://` URLs (and validates remote ones).
+    let table_url = ensure_table_uri(table_uri)?;
+    let delta_table = open_table(table_url).await?;
+    wrap_delta_table(delta_table, manifest, table_name, identity).await
 }
 
 /// Wrap an already-opened `DeltaTable` with governance policies.
 ///
 /// Use this when you have an existing `DeltaTable` instance (e.g.,
 /// created with custom storage options) and want to add governance.
-pub fn wrap_delta_table(
+///
+/// As of `deltalake` 0.32, `DeltaTable` no longer implements DataFusion's
+/// `TableProvider` directly; we materialize a provider through the
+/// [`TableProviderBuilder`](deltalake::delta_datafusion::TableProviderBuilder)
+/// exposed by [`DeltaTable::table_provider`], which is async and fallible.
+pub async fn wrap_delta_table(
     delta_table: DeltaTable,
     manifest: PolicyManifest,
     table_name: impl Into<String>,
     identity: QueryIdentity,
-) -> GovernedTable {
-    let provider: Arc<dyn TableProvider> = Arc::new(delta_table);
-    GovernedTable::new(provider, manifest, table_name, identity)
+) -> Result<GovernedTable, Box<dyn std::error::Error>> {
+    let provider: Arc<dyn TableProvider> = Arc::new(delta_table.table_provider().build().await?);
+    Ok(GovernedTable::new(provider, manifest, table_name, identity))
 }
 
 #[cfg(test)]
@@ -72,11 +80,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_wrap_delta_table_types_compile() {
-        // Verify that DeltaTable implements TableProvider at compile time.
-        // We can't open a real table in a unit test without a fixture,
-        // but this ensures the type constraints are met.
-        fn _assert_table_provider<T: TableProvider>() {}
-        _assert_table_provider::<DeltaTable>();
+    fn test_wrap_delta_table_signature_compiles() {
+        // As of deltalake 0.32, `DeltaTable` no longer implements
+        // `TableProvider`; a provider is built asynchronously via
+        // `DeltaTable::table_provider().build()`. We can't open a real table
+        // in a unit test without a fixture, so this just pins the public
+        // `wrap_delta_table` signature (async, fallible) at compile time.
+        fn _assert_signature<F, Fut>(_f: F)
+        where
+            F: Fn(DeltaTable, PolicyManifest, String, QueryIdentity) -> Fut,
+            Fut: std::future::Future<Output = Result<GovernedTable, Box<dyn std::error::Error>>>,
+        {
+        }
+        _assert_signature(wrap_delta_table);
     }
 }
