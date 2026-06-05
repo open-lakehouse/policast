@@ -57,15 +57,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to the head of the `stable` branch, whose action.yml defaults
+        # `toolchain: stable` -- so no explicit toolchain input is needed here.
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: rustfmt, clippy
 
       - name: Cache cargo registry + target
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Format check
         run: cargo fmt --all --check
@@ -89,15 +91,17 @@ jobs:
       matrix:
         rust: [stable, "1.96"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install Rust toolchain (${{ matrix.rust }})
-        uses: dtolnay/rust-toolchain@master
+        # `master` requires an explicit `toolchain` input (provided below), which
+        # the matrix needs anyway to install both `stable` and the `1.96` floor.
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: ${{ matrix.rust }}
 
       - name: Cache cargo registry + target
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           # Key per toolchain leg so stable and 1.96 don't clobber each other.
           key: ${{ matrix.rust }}
@@ -142,17 +146,17 @@ jobs:
       run:
         working-directory: policast-spark
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
           distribution: temurin
           java-version: "17"
           cache: sbt
 
       - name: Set up sbt
-        uses: sbt/setup-sbt@v1
+        uses: sbt/setup-sbt@af116cce31c00823d3903ce687f9cda3a4f19f1b # v1.2.1
         with:
           sbt-runner-version: 1.12.4
 
@@ -163,7 +167,7 @@ jobs:
         run: sbt -Dsbt.color=true assembly
 
       - name: Upload assembly jar
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # Version-suffixed so each matrix leg uploads a distinct artifact and
           # the smoke job can pull the exact line it runs against.
@@ -201,17 +205,17 @@ jobs:
       # SPARK_VERSION and the artifact uploaded by the `spark` job above.
       SPARK_SMOKE_VERSION: "4.1.2"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2.0.0
 
       # Optional: authenticate to Docker Hub to avoid anonymous pull rate limits
       # and reach the newfrontdocker/unitycatalog image. Skipped automatically
       # when the secrets are not configured.
       - name: Log in to Docker Hub
         if: ${{ env.DOCKERHUB_USERNAME != '' }}
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -219,13 +223,13 @@ jobs:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       # Reuse the `spark` job's assembly instead of re-running sbt inside Docker
       # (#14). The jar is staged into the build context so the `spark-prebuilt`
       # Dockerfile stage can COPY it (selected via SPARK_JAR_STAGE below).
       - name: Download policast-spark assembly
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: policast-spark-assembly-${{ env.SPARK_SMOKE_VERSION }}
           path: prebuilt-jar
@@ -247,7 +251,7 @@ jobs:
       # uncached docker builds. Each image gets its own cache scope so the legs
       # don't clobber one another.
       - name: Build sidecar image (cached)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile
@@ -258,7 +262,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=sidecar
 
       - name: Build demo image (cached)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile
@@ -269,7 +273,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=demo
 
       - name: Build shell image (cached)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile
@@ -282,7 +286,7 @@ jobs:
       # Spark demo image assembled from the PREBUILT jar (#14): selecting the
       # `spark-prebuilt` Dockerfile stage means sbt never runs in Docker here.
       - name: Build spark-demo image from prebuilt jar (cached)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile
