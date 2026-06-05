@@ -10,6 +10,7 @@ sidecar, and the DataFusion enforcement path.
 |---------|---------|----------|---------|
 | `sidecar` | (default) | long-running | `policast-uc-sidecar` on `:8765`, serving `/policies/resolve` from `examples/uc/store` (defaults to `--backend file`; also supports `--backend uc-bootstrap` — see below) |
 | `datafusion-demo` | `demo` | one-shot | Runs the `run_datafusion_uc_http` example against the sidecar over HTTP |
+| `spark-demo` | `spark` | one-shot | Runs the `RunSpark` example on a Spark 4.1 runtime (Scala 2.13, Java 17); the plugin enforces the compiled manifest via Catalyst rules (no sidecar) |
 | `compile` | `tools` | one-shot | Runs `scripts/compile-policies.sh` to (re)build `examples/policies/manifest.json` |
 | `df-shell` | `shell` | interactive | Rust toolchain + workspace mounted at `/workspace` for ad-hoc `cargo run --example ...` |
 | `unitycatalog` | `uc-oss` | long-running | Upstream Unity Catalog OSS image — staged only, not yet wired to the sidecar |
@@ -31,6 +32,7 @@ just demo          # run the DataFusion demo (analyst)
 just demo-admin    # admin: no row filter, no column masks
 just demo-physician# physician: row-filtered, no column masks
 just demo-ssn      # run all three back-to-back (SSN masking contrast)
+just spark-demo    # same governance, enforced by the Spark plugin (Catalyst)
 just clean         # tear down + drop named volumes
 ```
 
@@ -106,6 +108,41 @@ roles.
 > against the UC name and registering the `GovernedTable` under the
 > short name (derived from `POLICAST_TABLE` or overridden via
 > `POLICAST_GOVERNED_NAME`).
+
+## Spark enforcement path
+
+The same compiled policies enforce on Apache Spark via the
+`policast-spark` plugin (Catalyst optimizer rules) instead of DataFusion:
+
+```bash
+just spark-demo
+# or:
+docker compose --profile spark run --rm spark-demo
+```
+
+The `spark-demo` service (Dockerfile targets `spark-build` → `spark-demo`):
+
+1. Assembles the plugin fat jar with `sbt assembly` in a throwaway
+   Scala 2.13 / JDK 17 build stage (honors `MAVEN_PROXY_URL`).
+2. Runs on a Spark 4.1 distribution (Scala 2.13, Java 17). Spark 4.x is
+   Scala 2.13-only, so the standard `-bin-hadoop3` tarball is used.
+3. `spark-submit`s `com.policast.spark.examples.RunSpark` with
+   `spark.plugins` + `spark.sql.extensions` set, pointing
+   `spark.policast.manifest.path` at the manifest. `RunSpark` registers
+   `patients` as a catalog table (the rules identify a table by its
+   catalog identifier, which a file-backed temp view lacks).
+
+Unlike `datafusion-demo`, there is **no sidecar**: the plugin reads the
+file-based `manifest.json` directly. It enforces the **pre-expanded**
+manifest baked into the image (`policast-spark/src/main/resources/...`) —
+concrete `target_table` / `column` targets — because Spark has no
+tag-expansion step (the sidecar performs that for the DataFusion path),
+so it cannot consume the tag-templated `just compile` output. The
+`RunSpark` program walks analyst → physician → admin → legal in a single
+run, so every role's row filters and column masks appear at once (the
+Spark analogue of `just demo-ssn`). Override the pinned versions or log
+level via `SPARK_VERSION`, `SBT_VERSION`, and `POLICAST_SPARK_LOG_LEVEL`
+(see [`.env.example`](./.env.example)).
 
 ## Rebuilding the policy manifest
 
@@ -260,8 +297,11 @@ docker build --build-arg RUST_VERSION=1.91 --target sidecar -f docker/Dockerfile
 - **No TLS.** Auth is HMAC signatures on the resolve bundle; suitable
   for local dev only.
 - **`unitycatalog` is staged**, not wired. See above.
-- **`policast-spark` is not included.** It needs a JVM toolchain and
-  is run out-of-band with `sbt` / `spark-submit`.
+- **`policast-spark` runs file-based, not sidecar-backed.** The `spark`
+  profile (`just spark-demo`) enforces the compiled `manifest.json`
+  directly via Catalyst optimizer rules; it does not call the resolver
+  sidecar. The image runs Spark 4.1 (Scala 2.13, Java 17) to match the
+  plugin's build.
 - **The sidecar binary has no `--storage-uri-template` flag** yet, so
   the demo creates its own local Delta table and passes it via
   `UcTableOptions::storage_uri_override`. Real deployments will have
@@ -274,5 +314,6 @@ docker compose down -v        # drop containers and the named caches
 docker image rm \
   policast-sidecar:local \
   policast-demo:local \
-  policast-shell:local
+  policast-shell:local \
+  policast-spark-demo:local
 ```

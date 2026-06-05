@@ -4,6 +4,7 @@
 #   docker compose up -d sidecar                             # resolver
 #   docker compose --profile tools run --rm compile          # rebuild Cedar manifest
 #   docker compose --profile demo  run --rm datafusion-demo  # end-to-end query
+#   docker compose --profile spark run --rm spark-demo       # Spark plugin demo
 #   docker compose --profile shell run --rm df-shell         # interactive dev shell
 #   docker compose --profile uc-oss up -d unitycatalog       # UC OSS server only
 #   docker compose --profile uc-full up -d \
@@ -97,6 +98,28 @@ services:
       # (`resource.table_name == "patients"`). Unset => derived from the
       # last segment of POLICAST_TABLE.
       POLICAST_GOVERNED_NAME: ${POLICAST_GOVERNED_NAME-}
+    networks: [policast]
+
+  # Spark enforcement path. Builds the policast-spark assembly jar with sbt in
+  # a throwaway stage, then runs RunSpark on a Scala 2.13 Spark 3.5 runtime.
+  # No sidecar: the plugin enforces the file-based compiled manifest directly.
+  spark-demo:
+    profiles: ["spark"]
+    build:
+      <<: *build-context
+      target: spark-demo
+      args:
+        SPARK_VERSION: ${SPARK_VERSION:-4.1.2}
+        SBT_VERSION: ${SBT_VERSION:-1.12.4}
+        MAVEN_PROXY_URL: ${MAVEN_PROXY_URL:-}
+    image: policast-spark-demo:local
+    environment:
+      # Defaults point at the pre-expanded manifest + data baked into the image
+      # (see the spark-demo stage in docker/Dockerfile). Override to enforce a
+      # different already-expanded manifest.
+      POLICAST_MANIFEST_PATH: ${POLICAST_MANIFEST_PATH:-/opt/policast/examples/policies/manifest.json}
+      POLICAST_DATA_PATH: ${POLICAST_DATA_PATH:-/opt/policast/examples/data/patients.csv}
+      POLICAST_SPARK_LOG_LEVEL: ${POLICAST_SPARK_LOG_LEVEL:-WARN}
     networks: [policast]
 
   compile:

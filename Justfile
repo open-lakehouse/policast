@@ -128,6 +128,29 @@ compile:
     docker compose --profile tools run --rm compile
 
 # ---------------------------------------------------------------------------
+# Spark demo (Compose, profile `spark`)
+#
+# Mirrors the DataFusion demo but on the JVM: a Spark 3.5 (Scala 2.13)
+# container runs the policast-spark plugin, which enforces the compiled
+# manifest via Catalyst optimizer rules. The image assembles the plugin jar
+# with sbt (honoring MAVEN_PROXY_URL) in a throwaway build stage.
+# ---------------------------------------------------------------------------
+
+# Build the Spark demo image (sbt assembly -> Spark 3.5 runtime). Goes through
+# Compose so SPARK_VERSION / SBT_VERSION / MAVEN_PROXY_URL build args flow from
+# .env (a raw `docker build` would miss them and fail behind a Maven firewall).
+spark-build:
+    docker compose --profile spark build spark-demo
+
+# Run the Spark governance demo end-to-end in Compose. RunSpark cycles through
+# analyst -> physician -> admin -> legal in a single pass, so every role's row
+# filters and tag-scoped column masks are visible at once. The live
+# examples/policies/manifest.json is mounted read-only, so `just compile`
+# output is reflected without an image rebuild.
+spark-demo:
+    docker compose --profile spark run --rm spark-demo
+
+# ---------------------------------------------------------------------------
 # Interactive / auxiliary services
 # ---------------------------------------------------------------------------
 

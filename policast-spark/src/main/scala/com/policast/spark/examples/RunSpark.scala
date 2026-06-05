@@ -61,7 +61,12 @@ object RunSpark {
       .option("inferSchema", "true")
       .csv(csvPath)
 
-    patients.createOrReplaceTempView("patients")
+    // Register `patients` as a catalog table rather than a temp view: the
+    // governance rules identify a table by its catalog identifier, and a
+    // file-backed temp view carries none, so policies targeting `patients`
+    // would never match.
+    spark.sql("DROP TABLE IF EXISTS patients")
+    patients.write.mode("overwrite").saveAsTable("patients")
 
     // ---------------------------------------------------------------
     // Scenario 1: Query as analyst in us-east

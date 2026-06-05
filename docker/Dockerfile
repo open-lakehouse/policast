@@ -3,9 +3,11 @@
 # Multi-stage Dockerfile for the policast Compose stack.
 #
 # Build targets:
-#   - sidecar: minimal runtime image containing policast-uc-sidecar
-#   - demo:    runtime image containing the run_datafusion_uc_http example
-#   - shell:   rust toolchain + workspace source, for interactive dev use
+#   - sidecar:    minimal runtime image containing policast-uc-sidecar
+#   - demo:       runtime image containing the run_datafusion_uc_http example
+#   - shell:      rust toolchain + workspace source, for interactive dev use
+#   - spark-build: Scala 2.13 / sbt stage that assembles the policast-spark jar
+#   - spark-demo:  Spark 4.1 (Scala 2.13, Java 17) runtime that runs RunSpark
 #
 # Build each via:
 #   docker build --target <name> -t policast-<name> -f docker/Dockerfile .
@@ -148,3 +150,80 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /workspace
 
 CMD ["/bin/bash"]
+
+###############################################
+# 7. Spark plugin build stage (Scala 2.13 / sbt)
+###############################################
+FROM eclipse-temurin:17-jdk-jammy AS spark-build
+
+ARG SBT_VERSION=1.12.4
+# Optional corporate Maven mirror. When set, ALL sbt resolution is routed
+# through it: the launcher boot (sbt + Scala themselves), plugins, and project
+# dependencies. Locked-down build networks frequently block Maven Central, so
+# build.sbt's resolver list is not enough — the launcher boots before build.sbt
+# is read. This is the JVM analogue of .cargo/config.toml for the Rust stages.
+# When empty, sbt falls back to its public default repositories.
+ARG MAVEN_PROXY_URL=
+ENV DEBIAN_FRONTEND=noninteractive \
+    MAVEN_PROXY_URL=${MAVEN_PROXY_URL}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fL "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" \
+       | tar -xz -C /opt \
+    && ln -s /opt/sbt/bin/sbt /usr/local/bin/sbt
+
+WORKDIR /build
+COPY policast-spark/build.sbt ./build.sbt
+COPY policast-spark/project/plugins.sbt policast-spark/project/build.properties ./project/
+COPY policast-spark/src ./src
+
+# Build the assembly jar. With a proxy, write the sbt boot-repositories file and
+# override build-defined repos so even the launcher boot resolves via the mirror.
+RUN set -eux; \
+    if [ -n "${MAVEN_PROXY_URL}" ]; then \
+      mkdir -p /root/.sbt; \
+      { echo "[repositories]"; \
+        echo "  local"; \
+        echo "  maven-central: ${MAVEN_PROXY_URL}"; \
+        echo "  sbt-plugins: ${MAVEN_PROXY_URL}, [organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]"; \
+      } > /root/.sbt/repositories; \
+      export SBT_OPTS="-Dsbt.repository.config=/root/.sbt/repositories -Dsbt.override.build.repos=true"; \
+    fi; \
+    sbt assembly
+
+###############################################
+# 8. Spark demo runtime (Spark 4.1, Scala 2.13, Java 17)
+###############################################
+FROM eclipse-temurin:17-jre-jammy AS spark-demo
+
+ARG SPARK_VERSION=4.1.2
+ENV DEBIAN_FRONTEND=noninteractive \
+    SPARK_HOME=/opt/spark \
+    PATH=/opt/spark/bin:${PATH}
+
+# Spark 4.x is Scala 2.13-only (no -scala2.13 suffix) and requires Java 17+.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fL "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz" \
+       | tar -xz -C /opt \
+    && ln -s "/opt/spark-${SPARK_VERSION}-bin-hadoop3" /opt/spark
+
+COPY --from=spark-build /build/target/scala-2.13/policast-spark-assembly-0.1.0.jar \
+     /opt/policast/policast-spark-assembly.jar
+# Ship the pre-expanded manifest + sample data the plugin enforces against.
+# Spark has no tag-expansion step (the resolver sidecar does that for the
+# DataFusion path), so it consumes the already-expanded fixture with concrete
+# table/column targets — not the tag-templated `just compile` output.
+COPY policast-spark/src/main/resources/examples /opt/policast/examples
+COPY docker/entrypoint-spark.sh /usr/local/bin/entrypoint-spark.sh
+RUN chmod +x /usr/local/bin/entrypoint-spark.sh
+
+ENV POLICAST_SPARK_JAR=/opt/policast/policast-spark-assembly.jar \
+    POLICAST_MANIFEST_PATH=/opt/policast/examples/policies/manifest.json \
+    POLICAST_DATA_PATH=/opt/policast/examples/data/patients.csv
+
+WORKDIR /opt/policast
+ENTRYPOINT ["/usr/local/bin/entrypoint-spark.sh"]

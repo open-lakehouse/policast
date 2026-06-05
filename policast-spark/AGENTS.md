@@ -2,7 +2,7 @@
 
 ## What this module owns
 
-`policast-spark` is the Spark 3.5 plugin that enforces compiled policy manifests
+`policast-spark` is the Spark 4.1 plugin that enforces compiled policy manifests
 through Catalyst optimizer rules. It handles:
 
 - Spark plugin bootstrap (`SparkPlugin`, driver plugin).
