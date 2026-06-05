@@ -1,0 +1,144 @@
+name: CI
+
+# Mirrors the local `just ci-smoke` (scripts/ci-smoke.sh) gate:
+#   - rust   : native cargo build + test of the Cargo workspace, plus a
+#              Cedar -> manifest.json compile drift check (mirrors `just compile`).
+#   - spark  : native sbt test + assembly of the policast-spark plugin.
+#   - smoke  : the *full* docker-compose end-to-end smoke (`just ci-smoke`),
+#              which exercises the sidecar, DataFusion demos, UC OSS, and the
+#              uc-full MinIO-backed flow. Gated on rust + spark so we don't burn
+#              ~30+ minutes of Docker builds on a tree that can't compile.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Rust: build + test the workspace natively (fast, runs on every PR).
+  # Equivalent to the `just test` / `just compile` slices of the smoke gate.
+  # ---------------------------------------------------------------------------
+  rust:
+    name: rust (build + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy (all features, warnings as errors)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Build (all features)
+        run: cargo build --workspace --all-features
+
+      - name: Test (all features)
+        run: cargo test --workspace --all-features
+
+      # Mirror `just compile`: recompile the Cedar policies and fail if the
+      # checked-in manifest.json is stale.
+      - name: Compile Cedar policies -> manifest.json
+        run: ./scripts/compile-policies.sh
+
+      - name: Verify manifest.json is up to date
+        run: git diff --exit-code examples/policies/manifest.json
+
+  # ---------------------------------------------------------------------------
+  # Spark: build + test the policast-spark plugin natively (sbt, JDK 17).
+  # Equivalent to the Spark assembly the `spark-demo` image builds in the smoke.
+  # ---------------------------------------------------------------------------
+  spark:
+    name: spark (build + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: policast-spark
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: sbt
+
+      - name: Set up sbt
+        uses: sbt/setup-sbt@v1
+        with:
+          sbt-runner-version: 1.12.4
+
+      - name: Test
+        run: sbt -Dsbt.color=true test
+
+      - name: Assembly (fat jar)
+        run: sbt -Dsbt.color=true assembly
+
+      - name: Upload assembly jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: policast-spark-assembly
+          path: policast-spark/target/scala-2.13/policast-spark-assembly-*.jar
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Full docker-compose smoke: `just ci-smoke` (scripts/ci-smoke.sh).
+  # Builds the sidecar/demo/shell/spark images and runs the end-to-end demos,
+  # UC OSS, and the uc-full MinIO flow exactly as a local run would.
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: full smoke (docker compose)
+    runs-on: ubuntu-latest
+    needs: [rust, spark]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      # Optional: authenticate to Docker Hub to avoid anonymous pull rate limits
+      # and reach the newfrontdocker/unitycatalog image. Skipped automatically
+      # when the secrets are not configured.
+      - name: Log in to Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # `just ci-smoke` runs `just init` itself (copies docker/.env.example to
+      # .env), which already sets POLICAST_UC_SECRET. No extra setup needed.
+      - name: Run full smoke
+        run: just ci-smoke
+
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs || true
