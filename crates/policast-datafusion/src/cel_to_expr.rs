@@ -56,8 +56,7 @@ pub fn cel_to_datafusion_expr(
     cel: &str,
     identity: &dyn PrincipalProvider,
 ) -> Result<Option<Expr>, CelConvertError> {
-    let parsed =
-        cel_parser::parse(cel).map_err(|e| CelConvertError::ParseError(e.to_string()))?;
+    let parsed = cel_parser::parse(cel).map_err(|e| CelConvertError::ParseError(e.to_string()))?;
     let resolved = convert_expr(&parsed, identity)?;
     match resolved {
         Resolved::Scalar(ScalarValue::Boolean(Some(true))) => Ok(None),
@@ -80,8 +79,7 @@ pub fn cel_to_bool(
 ) -> Result<bool, CelConvertError> {
     use cel_interpreter::{Context, Program, Value};
 
-    let program =
-        Program::compile(cel).map_err(|e| CelConvertError::ParseError(e.to_string()))?;
+    let program = Program::compile(cel).map_err(|e| CelConvertError::ParseError(e.to_string()))?;
 
     let mut ctx = Context::default();
 
@@ -156,9 +154,7 @@ fn convert_expr(
             convert_arithmetic(l, op, r)
         }
 
-        other => Err(CelConvertError::UnsupportedExpression(format!(
-            "{other:?}"
-        ))),
+        other => Err(CelConvertError::UnsupportedExpression(format!("{other:?}"))),
     }
 }
 
@@ -407,11 +403,9 @@ mod tests {
 
     #[test]
     fn test_region_equality_filter() {
-        let expr = cel_to_datafusion_expr(
-            "(resource.region == principal.region)",
-            &analyst_us_east(),
-        )
-        .unwrap();
+        let expr =
+            cel_to_datafusion_expr("(resource.region == principal.region)", &analyst_us_east())
+                .unwrap();
         assert!(expr.is_some());
         let e = expr.unwrap();
         assert_eq!(
@@ -431,10 +425,7 @@ mod tests {
         let e = expr.unwrap();
         assert_eq!(
             format!("{e}"),
-            format!(
-                "{}",
-                col("treating_physician").eq(lit("Dr. Smith"))
-            )
+            format!("{}", col("treating_physician").eq(lit("Dr. Smith")))
         );
     }
 
@@ -445,8 +436,7 @@ mod tests {
             region: None,
             name: None,
         };
-        let result =
-            cel_to_datafusion_expr("(resource.region == principal.region)", &id);
+        let result = cel_to_datafusion_expr("(resource.region == principal.region)", &id);
         assert!(result.is_err());
     }
 
@@ -476,16 +466,17 @@ mod tests {
     #[test]
     fn test_constant_true_returns_none() {
         let cel = "(principal.role == \"analyst\")";
-        let expr =
-            cel_to_datafusion_expr(cel, &analyst_us_east()).unwrap();
-        assert!(expr.is_none(), "constant true should return None (no filter)");
+        let expr = cel_to_datafusion_expr(cel, &analyst_us_east()).unwrap();
+        assert!(
+            expr.is_none(),
+            "constant true should return None (no filter)"
+        );
     }
 
     #[test]
     fn test_constant_false_returns_lit_false() {
         let cel = "(principal.role == \"admin\")";
-        let expr =
-            cel_to_datafusion_expr(cel, &analyst_us_east()).unwrap();
+        let expr = cel_to_datafusion_expr(cel, &analyst_us_east()).unwrap();
         assert!(expr.is_some());
         assert_eq!(format!("{}", expr.unwrap()), format!("{}", lit(false)));
     }
@@ -494,7 +485,10 @@ mod tests {
     fn test_or_expression() {
         let cel = "(principal.role == \"admin\") || (principal.role == \"physician\")";
         let expr = cel_to_datafusion_expr(cel, &admin_user()).unwrap();
-        assert!(expr.is_none(), "admin matches first branch → constant true → None");
+        assert!(
+            expr.is_none(),
+            "admin matches first branch → constant true → None"
+        );
     }
 
     #[test]
@@ -527,8 +521,7 @@ mod tests {
     #[test]
     fn test_arithmetic_in_filter() {
         let id = analyst_us_east();
-        let expr =
-            cel_to_datafusion_expr("resource.price + 10 > 100", &id).unwrap();
+        let expr = cel_to_datafusion_expr("resource.price + 10 > 100", &id).unwrap();
         assert!(expr.is_some());
     }
 

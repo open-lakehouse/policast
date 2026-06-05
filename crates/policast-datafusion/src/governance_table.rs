@@ -180,9 +180,9 @@ fn apply_column_masks(
                 DataType::Utf8 | DataType::LargeUtf8 => Arc::new(Literal::new(
                     datafusion::common::ScalarValue::Utf8(Some(mask_val.to_string())),
                 )),
-                _ => Arc::new(Literal::new(datafusion::common::ScalarValue::Utf8(
-                    Some(mask_val.to_string()),
-                ))),
+                _ => Arc::new(Literal::new(datafusion::common::ScalarValue::Utf8(Some(
+                    mask_val.to_string(),
+                )))),
             };
             projection_exprs.push((lit_expr, name));
         } else {
@@ -246,12 +246,7 @@ mod tests {
             region: None,
             name: None,
         };
-        let governed = GovernedTable::new(
-            Arc::new(DummyProvider),
-            manifest,
-            "patients",
-            identity,
-        );
+        let governed = GovernedTable::new(Arc::new(DummyProvider), manifest, "patients", identity);
         let masks = governed.masked_columns();
         assert_eq!(masks.len(), 1);
         assert_eq!(masks[0].0, "ssn");

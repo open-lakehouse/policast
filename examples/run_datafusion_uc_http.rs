@@ -214,8 +214,11 @@ async fn seed_patients_delta(uri: &str) -> Result<(), Box<dyn std::error::Error>
         .with_columns(delta_schema.fields().cloned())
         .await?;
     // deltalake 0.32: WriteBuilder::new takes `Option<EagerSnapshot>`.
-    WriteBuilder::new(table.log_store(), Some(table.snapshot()?.snapshot().clone()))
-        .with_input_batches(vec![batch])
-        .await?;
+    WriteBuilder::new(
+        table.log_store(),
+        Some(table.snapshot()?.snapshot().clone()),
+    )
+    .with_input_batches(vec![batch])
+    .await?;
     Ok(())
 }

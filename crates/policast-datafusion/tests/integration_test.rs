@@ -26,9 +26,7 @@ fn patients_batch() -> RecordBatch {
         patients_schema(),
         vec![
             Arc::new(StringArray::from(vec!["1001", "1002", "1003", "1004"])),
-            Arc::new(StringArray::from(vec![
-                "Alice", "Bob", "Carol", "David",
-            ])),
+            Arc::new(StringArray::from(vec!["Alice", "Bob", "Carol", "David"])),
             Arc::new(StringArray::from(vec![
                 "111-11-1111",
                 "222-22-2222",
@@ -45,9 +43,7 @@ fn patients_batch() -> RecordBatch {
 }
 
 fn memtable() -> Arc<dyn datafusion::datasource::TableProvider> {
-    Arc::new(
-        MemTable::try_new(patients_schema(), vec![vec![patients_batch()]]).unwrap(),
-    )
+    Arc::new(MemTable::try_new(patients_schema(), vec![vec![patients_batch()]]).unwrap())
 }
 
 fn full_manifest() -> PolicyManifest {
@@ -123,7 +119,11 @@ async fn test_analyst_sees_only_own_region_and_masked_ssn() {
 
     // Should only see us-east rows with legal_hold=false → Alice (1001)
     // Carol (1003) has legal_hold=true and us-east, so she's excluded by deny override
-    assert_eq!(batch.num_rows(), 1, "analyst should see 1 row (us-east, non-legal-hold)");
+    assert_eq!(
+        batch.num_rows(),
+        1,
+        "analyst should see 1 row (us-east, non-legal-hold)"
+    );
 
     let patient_ids = batch
         .column(0)
@@ -172,7 +172,10 @@ async fn test_admin_sees_all_rows_unmasked() {
     let ctx = SessionContext::new();
     ctx.register_table("patients", Arc::new(governed)).unwrap();
 
-    let df = ctx.sql("SELECT patient_id, ssn FROM patients ORDER BY patient_id").await.unwrap();
+    let df = ctx
+        .sql("SELECT patient_id, ssn FROM patients ORDER BY patient_id")
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
     assert_eq!(batches.len(), 1);
     let batch = &batches[0];
@@ -184,7 +187,11 @@ async fn test_admin_sees_all_rows_unmasked() {
         .as_any()
         .downcast_ref::<StringArray>()
         .unwrap();
-    assert_eq!(ssn_col.value(0), "111-11-1111", "admin SSN should NOT be masked");
+    assert_eq!(
+        ssn_col.value(0),
+        "111-11-1111",
+        "admin SSN should NOT be masked"
+    );
 }
 
 #[tokio::test]
@@ -199,9 +206,8 @@ async fn test_legal_user_sees_legal_hold_rows() {
             column: None,
             target_tag: None,
             applies_to_tag: None,
-            cel_expression:
-                "(resource.legal_hold == true) && !(principal.role == \"legal\")"
-                    .into(),
+            cel_expression: "(resource.legal_hold == true) && !(principal.role == \"legal\")"
+                .into(),
             applies_to: None,
             description: None,
         }],
@@ -219,7 +225,10 @@ async fn test_legal_user_sees_legal_hold_rows() {
     let ctx = SessionContext::new();
     ctx.register_table("patients", Arc::new(governed)).unwrap();
 
-    let df = ctx.sql("SELECT patient_id FROM patients ORDER BY patient_id").await.unwrap();
+    let df = ctx
+        .sql("SELECT patient_id FROM patients ORDER BY patient_id")
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
     let batch = &batches[0];
 
@@ -242,9 +251,8 @@ async fn test_deny_override_blocks_legal_hold() {
             column: None,
             target_tag: None,
             applies_to_tag: None,
-            cel_expression:
-                "(resource.legal_hold == true) && !(principal.role == \"legal\")"
-                    .into(),
+            cel_expression: "(resource.legal_hold == true) && !(principal.role == \"legal\")"
+                .into(),
             applies_to: None,
             description: None,
         }],
@@ -262,7 +270,10 @@ async fn test_deny_override_blocks_legal_hold() {
     let ctx = SessionContext::new();
     ctx.register_table("patients", Arc::new(governed)).unwrap();
 
-    let df = ctx.sql("SELECT patient_id, legal_hold FROM patients ORDER BY patient_id").await.unwrap();
+    let df = ctx
+        .sql("SELECT patient_id, legal_hold FROM patients ORDER BY patient_id")
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
     let batch = &batches[0];
 
@@ -280,7 +291,10 @@ async fn test_deny_override_blocks_legal_hold() {
     let ids: Vec<&str> = (0..batch.num_rows())
         .map(|i| patient_ids.value(i))
         .collect();
-    assert!(!ids.contains(&"1003"), "Carol (legal_hold=true) should be excluded");
+    assert!(
+        !ids.contains(&"1003"),
+        "Carol (legal_hold=true) should be excluded"
+    );
 }
 
 #[tokio::test]
@@ -302,7 +316,10 @@ async fn test_no_policies_means_no_governance() {
     let ctx = SessionContext::new();
     ctx.register_table("patients", Arc::new(governed)).unwrap();
 
-    let df = ctx.sql("SELECT COUNT(*) as cnt FROM patients").await.unwrap();
+    let df = ctx
+        .sql("SELECT COUNT(*) as cnt FROM patients")
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
     let batch = &batches[0];
     let count = batch
@@ -327,8 +344,7 @@ async fn test_column_mask_with_select_star() {
             target_tag: None,
             applies_to_tag: None,
             cel_expression:
-                "(resource.table_name == \"patients\") && !((principal.role == \"admin\"))"
-                    .into(),
+                "(resource.table_name == \"patients\") && !((principal.role == \"admin\"))".into(),
             applies_to: None,
             description: None,
         }],
@@ -346,7 +362,10 @@ async fn test_column_mask_with_select_star() {
     let ctx = SessionContext::new();
     ctx.register_table("patients", Arc::new(governed)).unwrap();
 
-    let df = ctx.sql("SELECT * FROM patients ORDER BY patient_id").await.unwrap();
+    let df = ctx
+        .sql("SELECT * FROM patients ORDER BY patient_id")
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
     let batch = &batches[0];
 

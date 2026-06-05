@@ -179,7 +179,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn build_file_router(cli: &Cli, secret: Vec<u8>) -> Result<axum::Router, Box<dyn std::error::Error>> {
+fn build_file_router(
+    cli: &Cli,
+    secret: Vec<u8>,
+) -> Result<axum::Router, Box<dyn std::error::Error>> {
     let root = cli
         .store_root
         .as_ref()
@@ -213,7 +216,8 @@ async fn build_uc_bootstrap_router(
         cli.uc_endpoint
             .clone()
             .unwrap_or_else(|| "http://unitycatalog:8080".into()),
-    ).with_storage_options(storage_options);
+    )
+    .with_storage_options(storage_options);
 
     if let Some(template) = cli.uc_storage_uri_template.as_ref() {
         cfg = cfg.with_storage_uri_template(template);
@@ -273,8 +277,10 @@ async fn build_uc_bootstrap_router(
     _cli: &Cli,
     _secret: Vec<u8>,
 ) -> Result<axum::Router, Box<dyn std::error::Error>> {
-    Err("this binary was built without the `uc-bootstrap` Cargo feature; \
+    Err(
+        "this binary was built without the `uc-bootstrap` Cargo feature; \
          rebuild with `--features sidecar,uc-bootstrap` to enable \
          --backend uc-bootstrap"
-        .into())
+            .into(),
+    )
 }

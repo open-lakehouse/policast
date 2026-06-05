@@ -105,10 +105,8 @@ impl ResolverCore {
         let mut seen = std::collections::HashSet::new();
         applied_ids.retain(|(_, id)| seen.insert(id.clone()));
 
-        let policies_by_id: BTreeMap<&str, &PolicyRow> = policies
-            .iter()
-            .map(|p| (p.policy_id.as_str(), p))
-            .collect();
+        let policies_by_id: BTreeMap<&str, &PolicyRow> =
+            policies.iter().map(|p| (p.policy_id.as_str(), p)).collect();
         let manifest_by_id: BTreeMap<&str, &ManifestRow> = manifest_rows
             .iter()
             .map(|m| (m.policy_id.as_str(), m))
@@ -130,8 +128,7 @@ impl ResolverCore {
             binding_ids.push(policy_id.clone());
         }
 
-        let (expanded_policies, expanded_from) =
-            expand_tag_scoped(compiled, &tags, &req.table)?;
+        let (expanded_policies, expanded_from) = expand_tag_scoped(compiled, &tags, &req.table)?;
 
         let manifest = PolicyManifest {
             version: "1.0".into(),
@@ -148,7 +145,10 @@ impl ResolverCore {
             .format(&time::format_description::well_known::Rfc3339)
             .map_err(|e| UcError::Invalid(format!("rfc3339 format: {e}")))?;
 
-        let storage_uri = self.storage_uri_template.as_ref().map(|tpl| tpl.replace("{table}", &req.table));
+        let storage_uri = self
+            .storage_uri_template
+            .as_ref()
+            .map(|tpl| tpl.replace("{table}", &req.table));
 
         let unsigned = ResolveBundle {
             table_uuid: stable_table_uuid(&req.table),
@@ -662,8 +662,7 @@ mod tests {
             .iter()
             .find(|p| {
                 p.filter_type == FilterType::RowFilter
-                    && p.id
-                        .starts_with("row_filter_region")
+                    && p.id.starts_with("row_filter_region")
                     && p.target_table == "hospital.clinical.patients"
             })
             .expect("tag-expanded row_filter_region must be present for an analyst on patients");
@@ -809,7 +808,9 @@ mod tests {
         assert!(out[0].target_tag.is_none());
         assert!(out[0].applies_to_tag.is_none());
         assert_eq!(
-            audit.get("rf_by_clinical@hospital.clinical.patients").unwrap(),
+            audit
+                .get("rf_by_clinical@hospital.clinical.patients")
+                .unwrap(),
             "rf_by_clinical (target_tag=clinical)"
         );
     }
@@ -893,9 +894,14 @@ mod tests {
         let (out, audit) =
             expand_tag_scoped(vec![template], &tags, "hospital.clinical.patients").unwrap();
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].id, "mask_clinical_pii@hospital.clinical.patients:ssn");
         assert_eq!(
-            audit.get("mask_clinical_pii@hospital.clinical.patients:ssn").unwrap(),
+            out[0].id,
+            "mask_clinical_pii@hospital.clinical.patients:ssn"
+        );
+        assert_eq!(
+            audit
+                .get("mask_clinical_pii@hospital.clinical.patients:ssn")
+                .unwrap(),
             "mask_clinical_pii (target_tag=clinical,applies_to_tag=pii)"
         );
     }

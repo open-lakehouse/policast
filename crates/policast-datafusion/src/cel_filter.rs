@@ -66,25 +66,17 @@ pub fn build_row_filters(
                     Ok(Some(expr)) => filters.push(expr),
                     Ok(None) => {}
                     Err(e) => {
-                        eprintln!(
-                            "policast: skipping row filter '{}': {e}",
-                            policy.id
-                        );
+                        eprintln!("policast: skipping row filter '{}': {e}", policy.id);
                     }
                 }
             }
-            FilterType::DenyOverride => {
-                match build_deny_filter(&policy.cel_expression, identity) {
-                    Ok(Some(expr)) => filters.push(expr),
-                    Ok(None) => {}
-                    Err(e) => {
-                        eprintln!(
-                            "policast: skipping deny override '{}': {e}",
-                            policy.id
-                        );
-                    }
+            FilterType::DenyOverride => match build_deny_filter(&policy.cel_expression, identity) {
+                Ok(Some(expr)) => filters.push(expr),
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("policast: skipping deny override '{}': {e}", policy.id);
                 }
-            }
+            },
             FilterType::ColumnMask => {}
         }
     }
@@ -155,12 +147,9 @@ fn build_deny_filter(
 /// optional boolean columns).
 fn not_expr(expr: Expr) -> Expr {
     match &expr {
-        Expr::BinaryExpr(be)
-            if matches!(be.op, datafusion::logical_expr::Operator::Eq) =>
-        {
-            col_eq_lit_negation(&be.left, &be.right).unwrap_or_else(|| {
-                datafusion::logical_expr::not(expr.clone())
-            })
+        Expr::BinaryExpr(be) if matches!(be.op, datafusion::logical_expr::Operator::Eq) => {
+            col_eq_lit_negation(&be.left, &be.right)
+                .unwrap_or_else(|| datafusion::logical_expr::not(expr.clone()))
         }
         _ => datafusion::logical_expr::not(expr),
     }
@@ -356,11 +345,7 @@ mod tests {
 
     #[test]
     fn test_empty_expression_is_no_filter() {
-        let manifest = manifest_with(vec![row_filter_policy(
-            "empty",
-            "patients",
-            "true",
-        )]);
+        let manifest = manifest_with(vec![row_filter_policy("empty", "patients", "true")]);
         let identity = QueryIdentity {
             role: "analyst".into(),
             region: None,

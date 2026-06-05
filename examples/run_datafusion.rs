@@ -122,13 +122,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         name: None,
     };
 
-    let governed =
-        GovernedTable::new(Arc::clone(&mem_table), manifest.clone(), "patients", analyst_identity.clone());
+    let governed = GovernedTable::new(
+        Arc::clone(&mem_table),
+        manifest.clone(),
+        "patients",
+        analyst_identity.clone(),
+    );
 
     let ctx = SessionContext::new();
     ctx.register_table("patients", Arc::new(governed))?;
 
-    let df = ctx.sql("SELECT patient_id, name, ssn, diagnosis, region, legal_hold FROM patients").await?;
+    let df = ctx
+        .sql("SELECT patient_id, name, ssn, diagnosis, region, legal_hold FROM patients")
+        .await?;
     println!("  Row filters applied: analyst sees only us-east, legal_hold=false rows");
     println!("  Column masks: SSN and diagnosis should be masked for analyst role\n");
 

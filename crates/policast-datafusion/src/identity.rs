@@ -91,7 +91,9 @@ mod tests {
 
     #[test]
     fn test_attr_identity_snapshot() {
-        let id = AttrIdentity::new().with("role", "physician").with("region", "us-east");
+        let id = AttrIdentity::new()
+            .with("role", "physician")
+            .with("region", "us-east");
         let attrs = id.principal_attributes();
         assert_eq!(attrs.len(), 2);
         assert_eq!(attrs.get("role").map(String::as_str), Some("physician"));
@@ -100,7 +102,9 @@ mod tests {
 
     #[test]
     fn test_attr_identity_from_iter() {
-        let id: AttrIdentity = [("role", "legal"), ("region", "eu-west")].into_iter().collect();
+        let id: AttrIdentity = [("role", "legal"), ("region", "eu-west")]
+            .into_iter()
+            .collect();
         assert_eq!(id.attribute("role").as_deref(), Some("legal"));
         assert_eq!(id.attribute("region").as_deref(), Some("eu-west"));
     }

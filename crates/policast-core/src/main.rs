@@ -219,9 +219,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             description.clone(),
             output.as_deref(),
         ),
-        (Some(Commands::GenIdentity { manifest, lang, output }), _) => {
-            run_gen_identity(manifest, lang, output.as_deref())
-        }
+        (
+            Some(Commands::GenIdentity {
+                manifest,
+                lang,
+                output,
+            }),
+            _,
+        ) => run_gen_identity(manifest, lang, output.as_deref()),
         (None, false) => compile_to_file(&cli.files, cli.output.as_deref(), cli.verbose),
         (None, true) => {
             eprintln!("error: provide Cedar files or a subcommand; see --help");
@@ -246,7 +251,10 @@ fn compile_to_file(
     Ok(())
 }
 
-fn compile_all(files: &[PathBuf], verbose: bool) -> Result<PolicyManifest, Box<dyn std::error::Error>> {
+fn compile_all(
+    files: &[PathBuf],
+    verbose: bool,
+) -> Result<PolicyManifest, Box<dyn std::error::Error>> {
     let mut manifest = PolicyManifest::new();
     for path in files {
         let cedar_text = std::fs::read_to_string(path)?;
@@ -395,8 +403,7 @@ fn uc_bind(
     precedence: i32,
     properties_file: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut bindings: Vec<BindingRow> =
-        load_rows(store_root, "bindings.json").unwrap_or_default();
+    let mut bindings: Vec<BindingRow> = load_rows(store_root, "bindings.json").unwrap_or_default();
     // Upsert by (policy, target, selector) — users can re-run `bind`
     // idempotently to bump precedence.
     bindings.retain(|b| {
@@ -434,7 +441,9 @@ fn uc_diff(before: &Path, after: &Path) -> Result<(), Box<dyn std::error::Error>
     let b_rows: Rows<ManifestRow> = serde_json::from_str(&b_text)?;
     let a_rows: Rows<ManifestRow> = serde_json::from_str(&a_text)?;
     let by_id = |rows: &[ManifestRow]| -> BTreeMap<String, ManifestRow> {
-        rows.iter().map(|r| (r.policy_id.clone(), r.clone())).collect()
+        rows.iter()
+            .map(|r| (r.policy_id.clone(), r.clone()))
+            .collect()
     };
     let b = by_id(&b_rows.rows);
     let a = by_id(&a_rows.rows);
@@ -595,7 +604,10 @@ mod tests {
         assert_eq!(row.effect, "permit");
         assert_eq!(row.target_table, "patients");
         assert_eq!(row.version, 7);
-        assert_eq!(row.applies_to_roles.as_deref(), Some(&["analyst".to_string()][..]));
+        assert_eq!(
+            row.applies_to_roles.as_deref(),
+            Some(&["analyst".to_string()][..])
+        );
     }
 
     #[test]
@@ -683,18 +695,7 @@ mod tests {
 
     #[test]
     fn test_run_new_rejects_unknown_profile() {
-        assert!(run_new(
-            "nope",
-            None,
-            None,
-            None,
-            None,
-            None,
-            vec![],
-            None,
-            None,
-        )
-        .is_err());
+        assert!(run_new("nope", None, None, None, None, None, vec![], None, None,).is_err());
     }
 
     #[test]

@@ -49,10 +49,7 @@ pub fn parse_policies(cedar_text: &str) -> Result<Vec<ParsedPolicy>, PolicastErr
             .unwrap_or("permit")
             .to_string();
 
-        let principal_constraint = json_val
-            .get("principal")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let principal_constraint = json_val.get("principal").cloned().unwrap_or(Value::Null);
         let action_constraint = json_val.get("action").cloned().unwrap_or(Value::Null);
         let resource_constraint = json_val.get("resource").cloned().unwrap_or(Value::Null);
 

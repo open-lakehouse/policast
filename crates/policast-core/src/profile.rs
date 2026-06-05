@@ -140,66 +140,123 @@ mod tests {
 
     #[test]
     fn test_row_filter_requires_permit() {
-        let err = validate_profile("p", PolicyProfile::RowFilter, Effect::Forbid, 1, 0, false, false)
-            .unwrap_err();
+        let err = validate_profile(
+            "p",
+            PolicyProfile::RowFilter,
+            Effect::Forbid,
+            1,
+            0,
+            false,
+            false,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("must use `permit`"));
     }
 
     #[test]
     fn test_row_filter_no_when_warns() {
-        let warnings =
-            validate_profile("p", PolicyProfile::RowFilter, Effect::Permit, 0, 0, false, false)
-                .unwrap();
+        let warnings = validate_profile(
+            "p",
+            PolicyProfile::RowFilter,
+            Effect::Permit,
+            0,
+            0,
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("no `when`"));
     }
 
     #[test]
     fn test_column_mask_requires_forbid() {
-        let err =
-            validate_profile("p", PolicyProfile::ColumnMask, Effect::Permit, 0, 1, true, false)
-                .unwrap_err();
+        let err = validate_profile(
+            "p",
+            PolicyProfile::ColumnMask,
+            Effect::Permit,
+            0,
+            1,
+            true,
+            false,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("must use `forbid`"));
     }
 
     #[test]
     fn test_column_mask_requires_target() {
-        let err =
-            validate_profile("p", PolicyProfile::ColumnMask, Effect::Forbid, 0, 1, false, false)
-                .unwrap_err();
+        let err = validate_profile(
+            "p",
+            PolicyProfile::ColumnMask,
+            Effect::Forbid,
+            0,
+            1,
+            false,
+            false,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("@column or an @applies_to_tag"));
     }
 
     #[test]
     fn test_column_mask_no_unless_warns() {
-        let warnings =
-            validate_profile("p", PolicyProfile::ColumnMask, Effect::Forbid, 0, 0, true, false)
-                .unwrap();
+        let warnings = validate_profile(
+            "p",
+            PolicyProfile::ColumnMask,
+            Effect::Forbid,
+            0,
+            0,
+            true,
+            false,
+        )
+        .unwrap();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("no `unless`"));
     }
 
     #[test]
     fn test_column_mask_happy() {
-        let warnings =
-            validate_profile("p", PolicyProfile::ColumnMask, Effect::Forbid, 0, 1, false, true)
-                .unwrap();
+        let warnings = validate_profile(
+            "p",
+            PolicyProfile::ColumnMask,
+            Effect::Forbid,
+            0,
+            1,
+            false,
+            true,
+        )
+        .unwrap();
         assert!(warnings.is_empty());
     }
 
     #[test]
     fn test_deny_override_requires_forbid() {
-        let err =
-            validate_profile("p", PolicyProfile::DenyOverride, Effect::Permit, 1, 1, false, false)
-                .unwrap_err();
+        let err = validate_profile(
+            "p",
+            PolicyProfile::DenyOverride,
+            Effect::Permit,
+            1,
+            1,
+            false,
+            false,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("must use `forbid`"));
     }
 
     #[test]
     fn test_deny_override_no_when_warns() {
-        let warnings =
-            validate_profile("p", PolicyProfile::DenyOverride, Effect::Forbid, 0, 1, false, false)
-                .unwrap();
+        let warnings = validate_profile(
+            "p",
+            PolicyProfile::DenyOverride,
+            Effect::Forbid,
+            0,
+            1,
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("denies unconditionally"));
     }
@@ -212,7 +269,10 @@ mod tests {
             .collect();
         let mut flagged = non_canonical_principal_attrs(&attrs);
         flagged.sort();
-        assert_eq!(flagged, vec!["clearance".to_string(), "department".to_string()]);
+        assert_eq!(
+            flagged,
+            vec!["clearance".to_string(), "department".to_string()]
+        );
     }
 
     #[test]

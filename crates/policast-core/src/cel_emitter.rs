@@ -13,7 +13,10 @@ pub fn cedar_expr_to_cel(expr: &Value) -> Result<String, PolicastError> {
     match expr {
         Value::Bool(b) => Ok(b.to_string()),
         Value::Number(n) => Ok(n.to_string()),
-        Value::String(s) => Ok(format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))),
+        Value::String(s) => Ok(format!(
+            "\"{}\"",
+            s.replace('\\', "\\\\").replace('"', "\\\"")
+        )),
 
         Value::Object(map) if map.len() == 1 => {
             let (key, val) = map.iter().next().unwrap();
@@ -107,9 +110,10 @@ fn translate_node(key: &str, val: &Value) -> Result<String, PolicastError> {
 
         // -- Attribute access (dot operator) --
         "." => {
-            let left = cedar_expr_to_cel(val.get("left").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'left' in dot access".into())
-            })?)?;
+            let left =
+                cedar_expr_to_cel(val.get("left").ok_or_else(|| {
+                    PolicastError::CelEmit("Missing 'left' in dot access".into())
+                })?)?;
             let attr = val
                 .get("attr")
                 .and_then(|v| v.as_str())
@@ -119,9 +123,10 @@ fn translate_node(key: &str, val: &Value) -> Result<String, PolicastError> {
 
         // -- `has` operator (attribute existence) --
         "has" => {
-            let inner = cedar_expr_to_cel(val.get("left").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'left' in has".into())
-            })?)?;
+            let inner = cedar_expr_to_cel(
+                val.get("left")
+                    .ok_or_else(|| PolicastError::CelEmit("Missing 'left' in has".into()))?,
+            )?;
             let attr = val
                 .get("attr")
                 .and_then(|v| v.as_str())
@@ -131,9 +136,10 @@ fn translate_node(key: &str, val: &Value) -> Result<String, PolicastError> {
 
         // -- `like` operator (wildcard string match) --
         "like" => {
-            let left = cedar_expr_to_cel(val.get("left").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'left' in like".into())
-            })?)?;
+            let left = cedar_expr_to_cel(
+                val.get("left")
+                    .ok_or_else(|| PolicastError::CelEmit("Missing 'left' in like".into()))?,
+            )?;
             let pattern = val
                 .get("pattern")
                 .ok_or_else(|| PolicastError::CelEmit("Missing 'pattern' in like".into()))?;
@@ -143,72 +149,82 @@ fn translate_node(key: &str, val: &Value) -> Result<String, PolicastError> {
 
         // -- `if-then-else` --
         "if-then-else" => {
-            let cond = cedar_expr_to_cel(val.get("if").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'if' in if-then-else".into())
-            })?)?;
-            let then_expr = cedar_expr_to_cel(val.get("then").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'then' in if-then-else".into())
-            })?)?;
-            let else_expr = cedar_expr_to_cel(val.get("else").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'else' in if-then-else".into())
-            })?)?;
+            let cond =
+                cedar_expr_to_cel(val.get("if").ok_or_else(|| {
+                    PolicastError::CelEmit("Missing 'if' in if-then-else".into())
+                })?)?;
+            let then_expr =
+                cedar_expr_to_cel(val.get("then").ok_or_else(|| {
+                    PolicastError::CelEmit("Missing 'then' in if-then-else".into())
+                })?)?;
+            let else_expr =
+                cedar_expr_to_cel(val.get("else").ok_or_else(|| {
+                    PolicastError::CelEmit("Missing 'else' in if-then-else".into())
+                })?)?;
             Ok(format!("({cond}) ? ({then_expr}) : ({else_expr})"))
         }
 
         // -- `in` (set membership / hierarchy) --
         "in" => {
-            let left = cedar_expr_to_cel(val.get("left").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'left' in 'in'".into())
-            })?)?;
-            let right = cedar_expr_to_cel(val.get("right").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'right' in 'in'".into())
-            })?)?;
+            let left = cedar_expr_to_cel(
+                val.get("left")
+                    .ok_or_else(|| PolicastError::CelEmit("Missing 'left' in 'in'".into()))?,
+            )?;
+            let right = cedar_expr_to_cel(
+                val.get("right")
+                    .ok_or_else(|| PolicastError::CelEmit("Missing 'right' in 'in'".into()))?,
+            )?;
             Ok(format!("{left} in {right}"))
         }
 
         // -- `is` (entity type check) --
         "is" => {
-            let left = cedar_expr_to_cel(val.get("left").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'left' in 'is'".into())
-            })?)?;
+            let left = cedar_expr_to_cel(
+                val.get("left")
+                    .ok_or_else(|| PolicastError::CelEmit("Missing 'left' in 'is'".into()))?,
+            )?;
             let entity_type = val
                 .get("entity_type")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| {
-                    PolicastError::CelEmit("Missing 'entity_type' in 'is'".into())
-                })?;
+                .ok_or_else(|| PolicastError::CelEmit("Missing 'entity_type' in 'is'".into()))?;
             Ok(format!("{left}.type == \"{entity_type}\""))
         }
 
         // -- `contains` (set contains element) --
         "contains" => {
-            let left = cedar_expr_to_cel(val.get("left").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'left' in contains".into())
-            })?)?;
-            let right = cedar_expr_to_cel(val.get("right").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'right' in contains".into())
-            })?)?;
+            let left = cedar_expr_to_cel(
+                val.get("left")
+                    .ok_or_else(|| PolicastError::CelEmit("Missing 'left' in contains".into()))?,
+            )?;
+            let right =
+                cedar_expr_to_cel(val.get("right").ok_or_else(|| {
+                    PolicastError::CelEmit("Missing 'right' in contains".into())
+                })?)?;
             Ok(format!("{right} in {left}"))
         }
 
         // -- `containsAll` / `containsAny` --
         "containsAll" => {
-            let left = cedar_expr_to_cel(val.get("left").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'left' in containsAll".into())
-            })?)?;
-            let right = cedar_expr_to_cel(val.get("right").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'right' in containsAll".into())
-            })?)?;
+            let left =
+                cedar_expr_to_cel(val.get("left").ok_or_else(|| {
+                    PolicastError::CelEmit("Missing 'left' in containsAll".into())
+                })?)?;
+            let right =
+                cedar_expr_to_cel(val.get("right").ok_or_else(|| {
+                    PolicastError::CelEmit("Missing 'right' in containsAll".into())
+                })?)?;
             Ok(format!("{right}.all(e, e in {left})"))
         }
 
         "containsAny" => {
-            let left = cedar_expr_to_cel(val.get("left").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'left' in containsAny".into())
-            })?)?;
-            let right = cedar_expr_to_cel(val.get("right").ok_or_else(|| {
-                PolicastError::CelEmit("Missing 'right' in containsAny".into())
-            })?)?;
+            let left =
+                cedar_expr_to_cel(val.get("left").ok_or_else(|| {
+                    PolicastError::CelEmit("Missing 'left' in containsAny".into())
+                })?)?;
+            let right =
+                cedar_expr_to_cel(val.get("right").ok_or_else(|| {
+                    PolicastError::CelEmit("Missing 'right' in containsAny".into())
+                })?)?;
             Ok(format!("{right}.exists(e, e in {left})"))
         }
 
@@ -242,7 +258,9 @@ fn translate_node(key: &str, val: &Value) -> Result<String, PolicastError> {
                     .collect();
                 Ok(format!("{{{}}}", entries?.join(", ")))
             } else {
-                Err(PolicastError::CelEmit("Record node is not an object".into()))
+                Err(PolicastError::CelEmit(
+                    "Record node is not an object".into(),
+                ))
             }
         }
 
@@ -256,12 +274,14 @@ fn translate_node(key: &str, val: &Value) -> Result<String, PolicastError> {
 }
 
 fn translate_binary_op(op: &str, val: &Value) -> Result<String, PolicastError> {
-    let left = cedar_expr_to_cel(val.get("left").ok_or_else(|| {
-        PolicastError::CelEmit(format!("Missing 'left' in binary op '{op}'"))
-    })?)?;
-    let right = cedar_expr_to_cel(val.get("right").ok_or_else(|| {
-        PolicastError::CelEmit(format!("Missing 'right' in binary op '{op}'"))
-    })?)?;
+    let left =
+        cedar_expr_to_cel(val.get("left").ok_or_else(|| {
+            PolicastError::CelEmit(format!("Missing 'left' in binary op '{op}'"))
+        })?)?;
+    let right =
+        cedar_expr_to_cel(val.get("right").ok_or_else(|| {
+            PolicastError::CelEmit(format!("Missing 'right' in binary op '{op}'"))
+        })?)?;
     Ok(format!("({left} {op} {right})"))
 }
 
@@ -275,8 +295,7 @@ fn translate_value_literal(val: &Value) -> Result<String, PolicastError> {
         )),
         Value::Null => Ok("null".to_string()),
         Value::Array(arr) => {
-            let items: Result<Vec<String>, _> =
-                arr.iter().map(translate_value_literal).collect();
+            let items: Result<Vec<String>, _> = arr.iter().map(translate_value_literal).collect();
             Ok(format!("[{}]", items?.join(", ")))
         }
         Value::Object(map) => {
@@ -287,10 +306,7 @@ fn translate_value_literal(val: &Value) -> Result<String, PolicastError> {
                 let id_str = id.as_str().unwrap_or(&id_owned);
                 Ok(format!("\"{entity_type}::{id_str}\""))
             } else if map.contains_key("__entity") || map.contains_key("Ref") {
-                let entity = map
-                    .get("__entity")
-                    .or_else(|| map.get("Ref"))
-                    .unwrap();
+                let entity = map.get("__entity").or_else(|| map.get("Ref")).unwrap();
                 translate_entity_ref(entity)
             } else {
                 let entries: Result<Vec<String>, PolicastError> = map
@@ -311,10 +327,7 @@ fn translate_entity_ref(val: &Value) -> Result<String, PolicastError> {
         .get("type")
         .and_then(|v| v.as_str())
         .unwrap_or("Unknown");
-    let id = val
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
+    let id = val.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
     Ok(format!("\"{entity_type}::{id}\""))
 }
 
@@ -358,8 +371,8 @@ fn cedar_like_to_regex(pattern: &Value) -> Result<String, PolicastError> {
                     } else if let Some(lit) = obj.get("Literal").and_then(|v| v.as_str()) {
                         for ch in lit.chars() {
                             match ch {
-                                '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^'
-                                | '$' | '|' | '\\' => {
+                                '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$'
+                                | '|' | '\\' => {
                                     regex.push('\\');
                                     regex.push(ch);
                                 }

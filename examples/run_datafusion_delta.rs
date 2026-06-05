@@ -126,15 +126,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // deltalake 0.32: WriteBuilder::new now takes `Option<EagerSnapshot>`
     // (the table's loaded snapshot) rather than `Option<DeltaTableState>`.
-    let table = WriteBuilder::new(table.log_store(), Some(table.snapshot()?.snapshot().clone()))
-        .with_input_batches(vec![batch])
-        .await?;
+    let table = WriteBuilder::new(
+        table.log_store(),
+        Some(table.snapshot()?.snapshot().clone()),
+    )
+    .with_input_batches(vec![batch])
+    .await?;
 
     println!("  Delta table created at: {table_uri}");
-    println!(
-        "  Version: {}",
-        table.version().unwrap_or_default()
-    );
+    println!("  Version: {}", table.version().unwrap_or_default());
     println!();
 
     // ---------------------------------------------------------------
@@ -150,13 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // deltalake 0.32: `DeltaTable` no longer implements `TableProvider`, so
     // `wrap_delta_table` is now async + fallible (it builds a provider).
-    let governed = wrap_delta_table(
-        table,
-        manifest.clone(),
-        "patients",
-        analyst_identity,
-    )
-    .await?;
+    let governed = wrap_delta_table(table, manifest.clone(), "patients", analyst_identity).await?;
 
     let ctx = SessionContext::new();
     ctx.register_table("patients", Arc::new(governed))?;
