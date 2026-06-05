@@ -46,7 +46,7 @@ Cedar Policy (.cedar)
 |------|----------|---------|
 | `crates/policast-core/` | Rust | Cedar parser, CEL emitter, CLI binary (`policast`), policy manifest |
 | `crates/policast-datafusion/` | Rust | DataFusion `GovernedTable` wrapper, CEL→DataFusion `Expr` compiler, row filters, column masks, optional Delta Lake via `delta` feature |
-| `policast-spark/` | Scala | Spark 3.5 plugin, Catalyst optimizer rules, CEL evaluator (cel-java), not a Cargo workspace member |
+| `policast-spark/` | Scala | Spark 4.1 plugin, Catalyst optimizer rules, CEL evaluator (cel-java), not a Cargo workspace member |
 | `examples/` | Mixed | Cedar policies, sample data (`patients.csv`), DataFusion and Spark demo runners |
 | `scripts/` | Shell | `compile-policies.sh` convenience script |
 | `docs/` | Markdown | Technical documentation (Delta integration, etc.) |
@@ -64,7 +64,7 @@ Use these focused guides when working inside a specific module:
 
 - **policast-core**: `cedar-policy` (4.x), `serde`, `serde_json`, `clap`, `thiserror`
 - **policast-datafusion**: `datafusion` (46), `cel-interpreter`, `cel-parser`, optional `deltalake` (0.25)
-- **policast-spark**: Spark 3.5, `cel-java` 0.12, Gson
+- **policast-spark**: Spark 4.1, `cel-java` 0.12, Gson
 
 ## Governance model
 

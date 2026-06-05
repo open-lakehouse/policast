@@ -153,19 +153,23 @@ talks to it over HTTP:
 cp docker/.env.example .env
 docker compose up -d sidecar
 docker compose --profile demo run --rm datafusion-demo
+
+# Same policies enforced on Spark (Catalyst rules, no sidecar):
+docker compose --profile spark run --rm spark-demo   # or: just spark-demo
 ```
 
-Other profiles: `tools` (recompile Cedar manifest), `shell`
-(interactive Rust dev shell), `uc-oss` (staged Unity Catalog OSS
-server). See [docker/README.md](docker/README.md) for the full map.
+Other profiles: `spark` (Spark plugin demo on a Spark 4.1 runtime —
+Scala 2.13, Java 17), `tools` (recompile Cedar manifest), `shell` (interactive Rust
+dev shell), `uc-oss` (staged Unity Catalog OSS server). See
+[docker/README.md](docker/README.md) for the full map.
 
 ### Option B: Local toolchain
 
 #### Prerequisites
 
 - Rust 1.75+ (for policast-core and policast-datafusion)
-- JDK 11+ and sbt 1.10+ (for policast-spark)
-- Apache Spark 3.5+ (for running the Spark demo)
+- JDK 17+ and sbt 1.10+ (for policast-spark)
+- Apache Spark 4.1+ (for running the Spark demo)
 
 ### 1. Compile Cedar Policies
 
@@ -192,6 +196,11 @@ cargo run --example run_datafusion -p policast-datafusion
 ```
 
 ### 3. Run the Spark Demo
+
+> Prefer Compose? `just spark-demo` (profile `spark`) builds the jar and
+> runs this on a pinned Spark 4.1 runtime (Scala 2.13, Java 17) with no local
+> toolchain — see [Option A](#option-a-docker-compose-recommended). The
+> steps below are the equivalent host-toolchain invocation.
 
 ```bash
 # Build the Spark jar

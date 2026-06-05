@@ -94,14 +94,14 @@ class CelEvaluator(schema: StructType) {
     if (cel.contains("resource.region") && cel.contains("principal.region")) {
       identity.attribute("region").flatMap { region =>
         findAttribute(output, "region").map { attr =>
-          EqualTo(attr, Literal(region, StringType))
+          EqualTo(attr, Literal.create(region, StringType))
         }
       }
     }
     else if (cel.contains("resource.treating_physician") && cel.contains("principal.name")) {
       identity.attribute("name").flatMap { name =>
         findAttribute(output, "treating_physician").map { attr =>
-          EqualTo(attr, Literal(name, StringType))
+          EqualTo(attr, Literal.create(name, StringType))
         }
       }
     }
