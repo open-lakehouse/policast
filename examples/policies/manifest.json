@@ -28,6 +28,20 @@
       "description": "Block access to records under legal hold unless user has legal role"
     },
     {
+      "id": "row_filter_physician",
+      "effect": "permit",
+      "filter_type": "row_filter",
+      "target_table": "patients",
+      "cel_expression": "(resource.treating_physician == principal.name)",
+      "applies_to": {
+        "roles": [
+          "physician"
+        ],
+        "principals": []
+      },
+      "description": "Restrict physicians to their own patients"
+    },
+    {
       "id": "row_filter_region",
       "effect": "permit",
       "filter_type": "row_filter",
@@ -41,20 +55,6 @@
         "principals": []
       },
       "description": "Restrict analysts to clinical rows in their assigned region"
-    },
-    {
-      "id": "row_filter_physician",
-      "effect": "permit",
-      "filter_type": "row_filter",
-      "target_table": "patients",
-      "cel_expression": "(resource.treating_physician == principal.name)",
-      "applies_to": {
-        "roles": [
-          "physician"
-        ],
-        "principals": []
-      },
-      "description": "Restrict physicians to their own patients"
     }
   ],
   "principal_contract": {
