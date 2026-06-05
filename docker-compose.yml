@@ -112,6 +112,12 @@ services:
         SPARK_VERSION: ${SPARK_VERSION:-4.1.2}
         SBT_VERSION: ${SBT_VERSION:-1.12.4}
         MAVEN_PROXY_URL: ${MAVEN_PROXY_URL:-}
+        # Assembly jar source (see docker/Dockerfile stage 7c). Default builds
+        # from source with sbt so `just spark-demo` works offline of CI. CI sets
+        # SPARK_JAR_STAGE=spark-prebuilt (+ stages the jar at
+        # POLICAST_SPARK_JAR_PATH) to reuse the `spark` job's artifact instead.
+        SPARK_JAR_STAGE: ${SPARK_JAR_STAGE:-spark-build}
+        POLICAST_SPARK_JAR_PATH: ${POLICAST_SPARK_JAR_PATH:-docker/prebuilt/policast-spark-assembly.jar}
     image: policast-spark-demo:local
     environment:
       # Defaults point at the pre-expanded manifest + data baked into the image

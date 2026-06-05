@@ -2,7 +2,11 @@ name := "policast-spark"
 version := "0.1.0"
 scalaVersion := "2.13.16"
 
-val sparkVersion = "4.1.2"
+// Spark line to build/test against. Defaults to the pinned 4.1.2 (matches
+// docker/Dockerfile SPARK_VERSION) but honors a SPARK_VERSION env override so
+// CI can drive the Spark version matrix (see .github/workflows/ci.yml). Spark
+// 4.x is Scala 2.13-only, so only 4.x lines are currently valid here.
+val sparkVersion = sys.env.get("SPARK_VERSION").map(_.trim).filter(_.nonEmpty).getOrElse("4.1.2")
 
 // Optional Maven mirror: when MAVEN_PROXY_URL is set in the environment
 // (e.g. a corporate firewall proxy), point sbt at it as a single resolver.
