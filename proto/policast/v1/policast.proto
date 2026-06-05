@@ -1,0 +1,190 @@
+// policast-cel — draft Protobuf schema for the PolicyManifest and the
+// resolver wire contract.
+//
+// STATUS: DRAFT / RFC ARTIFACT. This file is intentionally NOT wired into
+// any build (no prost/tonic/ScalaPB codegen, no Cargo/sbt dependency). It
+// accompanies research/protobuf-manifest.md and exists so reviewers can
+// react to a concrete schema. Field numbers are a proposal, not a frozen
+// contract, until the RFC is accepted.
+//
+// Design rules followed here:
+//   * proto3, with explicit enum ZERO = *_UNSPECIFIED (so an unknown/old
+//     value is detectable rather than silently aliasing a real variant —
+//     today an unknown filter_type silently becomes a row_filter).
+//   * `optional` on every field that is `Option<T>` / nullable in the
+//     Rust model, so "absent" and "empty/default" stay distinguishable.
+//   * Field names match the current JSON keys (snake_case) so the proto3
+//     JSON mapping can emit/accept the existing on-disk manifests during
+//     the transition (see RFC §"Wire-compat").
+//   * Signing is handled by an envelope over the exact serialized bytes
+//     (SignedResolveBundle), sidestepping cross-language canonicalization.
+
+syntax = "proto3";
+
+package policast.v1;
+
+// ---------------------------------------------------------------------------
+// Manifest core (mirrors crates/policast-core/src/model.rs +
+// policy_manifest.rs)
+// ---------------------------------------------------------------------------
+
+// The effect a Cedar policy has when matched. Mirrors `Effect`.
+enum Effect {
+  EFFECT_UNSPECIFIED = 0;
+  EFFECT_PERMIT = 1;
+  EFFECT_FORBID = 2;
+}
+
+// The kind of governance enforcement a compiled policy represents.
+// Mirrors `FilterType`. Note the ZERO guard: the Rust compiler currently
+// falls back to RowFilter for an unknown annotation; with an explicit
+// UNSPECIFIED the engines can instead fail closed.
+enum FilterType {
+  FILTER_TYPE_UNSPECIFIED = 0;
+  FILTER_TYPE_ROW_FILTER = 1;
+  FILTER_TYPE_COLUMN_MASK = 2;
+  FILTER_TYPE_DENY_OVERRIDE = 3;
+}
+
+// Which principals a policy applies to. Mirrors `AppliesTo`. Both lists
+// may be empty (meaning "applies to everyone").
+message AppliesTo {
+  repeated string roles = 1;
+  repeated string principals = 2;
+}
+
+// Compile-time footprint of the `principal.*` attributes referenced
+// across a policy set. Mirrors `PrincipalContract`. Sorted + de-duped by
+// the compiler; consumers must not assume a particular order beyond that.
+message PrincipalContract {
+  repeated string required_attributes = 1;
+}
+
+// A single compiled policy rule. Mirrors `CompiledPolicy`. The Cedar
+// source has been parsed and its when/unless conditions translated into a
+// single portable CEL string (`cel_expression`).
+message CompiledPolicy {
+  // Stable policy identifier (Cedar @id annotation).
+  string id = 1;
+  Effect effect = 2;
+  FilterType filter_type = 3;
+
+  // Fully-qualified table name, `a.b.*` schema wildcard, or `*` for any
+  // table. May be `*` when `target_tag` carries the real scope.
+  string target_table = 4;
+
+  // Concrete column for a column_mask, or absent when `applies_to_tag`
+  // carries the selector (or the policy is a row_filter / deny_override).
+  optional string column = 5;
+
+  // Tag expression selecting which tables the policy applies to. When
+  // set, the resolver expands the policy into one concrete policy per
+  // matching table before any engine sees it.
+  optional string target_tag = 6;
+
+  // Tag expression selecting which columns a column_mask applies to.
+  // Mutually exclusive with `column`.
+  optional string applies_to_tag = 7;
+
+  // The portable CEL boolean expression enforced by the engines. Kept as
+  // an opaque string in v1 (CEL is itself a text language); a future
+  // revision MAY add a parsed-CEL representation alongside it.
+  string cel_expression = 8;
+
+  // Role/principal scoping. Absent means "applies to everyone".
+  optional AppliesTo applies_to = 9;
+
+  // Human-readable description (Cedar @description annotation).
+  optional string description = 10;
+}
+
+// A versioned manifest of compiled policies. Mirrors `PolicyManifest`.
+message PolicyManifest {
+  // Semantic version of the policy set authored by humans (e.g. "1.0").
+  // This is NOT the schema/wire version (see manifest_schema_version).
+  string version = 1;
+
+  repeated CompiledPolicy policies = 2;
+
+  // Compile-time principal footprint; absent when no policy references
+  // the principal (keeps parity with pre-footprint JSON manifests).
+  optional PrincipalContract principal_contract = 3;
+
+  // Wire/schema version of THIS proto contract, distinct from the
+  // author-facing `version`. Lets consumers reject manifests newer than
+  // they understand. New in the proto era; absent/0 means "v1".
+  uint32 manifest_schema_version = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Resolver wire contract (mirrors crates/policast-uc/src/types.rs)
+// ---------------------------------------------------------------------------
+
+// The principal making a query. Mirrors `Principal`.
+message Principal {
+  string id = 1;
+  string role = 2;
+  // Arbitrary ABAC attributes (e.g. region). A proto map; see the RFC on
+  // why maps complicate signing and how the envelope avoids the issue.
+  map<string, string> attrs = 3;
+}
+
+// POST body for /policies/resolve. Mirrors `ResolveRequest`.
+message ResolveRequest {
+  string table = 1;
+  Principal principal = 2;
+  // Defaults to "query" in the current Rust serde model.
+  string requested_action = 3;
+}
+
+// Short-lived storage credentials vended by the resolver. Mirrors
+// `StorageCredentials`. `extra` absorbs cloud-specific fields that were
+// previously serde(flatten)'d into the JSON object.
+message StorageCredentials {
+  optional string aws_access_key_id = 1;
+  optional string aws_secret_access_key = 2;
+  optional string aws_session_token = 3;
+  optional string expiration = 4;
+  map<string, string> extra = 5;
+}
+
+// Response body from /policies/resolve. Mirrors `ResolveBundle`, MINUS the
+// `signature` field — signing now lives on the SignedResolveBundle
+// envelope so we never have to "zero a field then re-serialize
+// canonically" across two languages.
+message ResolveBundle {
+  string table_uuid = 1;
+  PolicyManifest compiled_manifest = 2;
+  repeated string bindings_applied = 3;
+  // Audit trail for Cedar-template expansion: expanded policy id ->
+  // template lineage.
+  map<string, string> expanded_from = 4;
+  map<string, string> identity_claims = 5;
+  optional StorageCredentials storage_credentials = 6;
+  optional string storage_uri = 7;
+  // RFC3339 timestamp.
+  string expires_at = 8;
+}
+
+// Signing envelope. The resolver serializes a `ResolveBundle` to bytes,
+// puts those EXACT bytes in `bundle_bytes`, and HMACs them. Verifiers
+// check the MAC over `bundle_bytes` as received, then decode — so no
+// party ever needs a canonical re-serialization, which proto3 does not
+// guarantee across languages (map ordering, unknown fields).
+message SignedResolveBundle {
+  bytes bundle_bytes = 1;
+  // e.g. "hmac-sha256:<hex>" — keeps the existing tag scheme.
+  string signature = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Service (Phase 3 — connectRPC / gRPC). Defined here for review; the RFC
+// recommends shipping the message schema first and the service later.
+// ---------------------------------------------------------------------------
+
+service PolicyResolver {
+  // Mirrors today's POST /policies/resolve. Returns a signed envelope so
+  // the transport (gRPC, gRPC-Web, or Connect over plain HTTP/JSON) is
+  // orthogonal to tamper-evidence.
+  rpc Resolve(ResolveRequest) returns (SignedResolveBundle);
+}
