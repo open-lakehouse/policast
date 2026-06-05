@@ -650,10 +650,6 @@ mod tests {
                 calls: Arc::new(AtomicUsize::new(0)),
             }
         }
-
-        fn count(&self) -> usize {
-            self.calls.load(Ordering::SeqCst)
-        }
     }
 
     #[async_trait]
@@ -664,6 +660,7 @@ mod tests {
                 manifest: PolicyManifest {
                     version: "1.0".into(),
                     policies: vec![policy("p1", "patients", None)],
+                    principal_contract: None,
                 },
                 identity_claims: Default::default(),
                 bindings_applied: vec!["p1".into()],
@@ -815,6 +812,7 @@ mod tests {
             manifest: PolicyManifest {
                 version: "1.0".into(),
                 policies: vec![policy("p1", "patients", None)],
+                principal_contract: None,
             },
             identity_claims: Default::default(),
             bindings_applied: vec!["p1".into()],
@@ -863,6 +861,7 @@ mod tests {
             manifest: PolicyManifest {
                 version: "1.0".into(),
                 policies: vec![policy("p1", "patients", None)],
+                principal_contract: None,
             },
             identity_claims: Default::default(),
             bindings_applied: vec!["p1".into()],

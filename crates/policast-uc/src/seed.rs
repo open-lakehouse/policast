@@ -436,7 +436,7 @@ fn parse_ts_micros(s: &str) -> Option<i64> {
     let ss: u32 = ss_and_frac.split('.').next()?.parse().ok()?;
     // naive UTC -> micros via a tiny portable routine.
     let days = days_from_civil(y, m, d);
-    let secs = days as i64 * 86_400 + hh as i64 * 3_600 + mm as i64 * 60 + ss as i64;
+    let secs = days * 86_400 + hh as i64 * 3_600 + mm as i64 * 60 + ss as i64;
     Some(secs * 1_000_000)
 }
 

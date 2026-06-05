@@ -279,8 +279,8 @@ fn row_to_compiled(pol: &PolicyRow, man: &ManifestRow) -> Result<CompiledPolicy,
 /// * Expanded policy ids are deterministic:
 ///   - `{id}@{table}` for table-level expansion
 ///   - `{id}@{table}:{column}` for column-level expansion
-///   (this means a tag-scoped template never shadows a concrete
-///   policy with the same id).
+///     (this means a tag-scoped template never shadows a concrete
+///     policy with the same id).
 /// * Non-tag-scoped policies pass through unchanged.
 /// * Retired (tombstoned) tag rows are ignored.
 ///
@@ -332,7 +332,7 @@ fn expand_tag_scoped(
                     );
                     out.push(CompiledPolicy {
                         id: expanded_id,
-                        effect: policy.effect.clone(),
+                        effect: policy.effect,
                         filter_type: policy.filter_type.clone(),
                         target_table: table.clone(),
                         column: Some(col),
@@ -352,7 +352,7 @@ fn expand_tag_scoped(
                 );
                 out.push(CompiledPolicy {
                     id: expanded_id,
-                    effect: policy.effect.clone(),
+                    effect: policy.effect,
                     filter_type: policy.filter_type.clone(),
                     target_table: table,
                     column: policy.column.clone(),
