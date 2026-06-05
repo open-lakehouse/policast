@@ -24,9 +24,8 @@ Instead, report privately using one of the following:
 
 - GitHub's [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
   ("Report a vulnerability" under the repository's **Security** tab), or
-- Email the maintainers at
-  <!-- TODO(maintainers): replace with a monitored security contact, e.g. security@example.org -->
-  **`TODO: ADD SECURITY CONTACT`**.
+- Email the maintainers at:
+  Scott Haines (newfrontcreative@gmail.com
 
 Please include:
 
