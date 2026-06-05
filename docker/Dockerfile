@@ -15,7 +15,7 @@
 ########################
 # 1. Common Rust builder
 ########################
-ARG RUST_VERSION=1.90
+ARG RUST_VERSION=1.96
 FROM rust:${RUST_VERSION}-slim-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive \

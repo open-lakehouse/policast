@@ -49,10 +49,7 @@ pub fn parse_policies(cedar_text: &str) -> Result<Vec<ParsedPolicy>, PolicastErr
             .unwrap_or("permit")
             .to_string();
 
-        let principal_constraint = json_val
-            .get("principal")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let principal_constraint = json_val.get("principal").cloned().unwrap_or(Value::Null);
         let action_constraint = json_val.get("action").cloned().unwrap_or(Value::Null);
         let resource_constraint = json_val.get("resource").cloned().unwrap_or(Value::Null);
 
@@ -82,6 +79,12 @@ pub fn parse_policies(cedar_text: &str) -> Result<Vec<ParsedPolicy>, PolicastErr
             annotations,
         });
     }
+
+    // Cedar's `PolicySet` is HashMap-backed, so `policies()` yields a
+    // non-deterministic order. Sort by policy id for a stable, reproducible
+    // manifest (Cedar evaluation is order-independent, so this is purely
+    // cosmetic for enforcement but essential for diff/drift checks).
+    results.sort_by(|a, b| a.id.cmp(&b.id));
 
     Ok(results)
 }
@@ -152,5 +155,42 @@ mod tests {
         assert_eq!(policies[0].id, "deny_test");
         assert_eq!(policies[0].effect, "forbid");
         assert_eq!(policies[0].conditions.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_policies_sorted_by_id_deterministically() {
+        // Authored out of id order and parsed repeatedly: Cedar's PolicySet is
+        // HashMap-backed, so without an explicit sort the output order would be
+        // non-deterministic. We always emit policies sorted by id.
+        let cedar = r#"
+            @id("zebra")
+            permit (principal, action == Action::"query", resource)
+            when { resource.region == "us-east" };
+
+            @id("alpha")
+            permit (principal, action == Action::"query", resource)
+            when { resource.region == "us-west" };
+
+            @id("mike")
+            permit (principal, action == Action::"query", resource)
+            when { resource.region == "eu" };
+        "#;
+
+        let ids: Vec<String> = parse_policies(cedar)
+            .expect("should parse")
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(ids, vec!["alpha", "mike", "zebra"]);
+
+        // Re-parsing yields the identical order every time.
+        for _ in 0..5 {
+            let again: Vec<String> = parse_policies(cedar)
+                .expect("should parse")
+                .into_iter()
+                .map(|p| p.id)
+                .collect();
+            assert_eq!(again, ids);
+        }
     }
 }

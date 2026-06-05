@@ -46,8 +46,7 @@ use serde::Deserialize;
 use tokio::task::AbortHandle;
 
 use datafusion::arrow::array::{
-    Array, AsArray, Int32Array, Int64Array, ListArray, StringArray,
-    TimestampMicrosecondArray,
+    Array, AsArray, Int32Array, Int64Array, ListArray, StringArray, TimestampMicrosecondArray,
 };
 use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
@@ -150,7 +149,10 @@ impl UcBootstrapConfig {
     /// Resolve a fully-qualified governance table name for a short
     /// table id (`policies`, `manifest`, `bindings`, `tags`).
     pub fn governance_table_name(&self, name: &str) -> String {
-        format!("{}.{}.{}", self.governance_catalog, self.governance_schema, name)
+        format!(
+            "{}.{}.{}",
+            self.governance_catalog, self.governance_schema, name
+        )
     }
 
     /// Resolve the static URI for one of the four governance tables.
@@ -262,12 +264,7 @@ impl UcBootstrapBackend {
             let task_cfg = cfg.clone();
             let task_snap = Arc::clone(&snapshot);
             let task_inv = invalidation.clone();
-            let handle = tokio::spawn(refresh_loop(
-                task_cfg,
-                task_snap,
-                task_inv,
-                interval,
-            ));
+            let handle = tokio::spawn(refresh_loop(task_cfg, task_snap, task_inv, interval));
             Arc::new(RefreshGuard {
                 abort: handle.abort_handle(),
             })
@@ -362,7 +359,10 @@ struct ResolvedTableAccess {
 ///    template and options are `cfg.storage_options`.
 /// 2) UC-vended mode (`storage_uri_template` unset): call UC REST for
 ///    table metadata + temporary table credentials.
-async fn resolve_table_access(cfg: &UcBootstrapConfig, short_name: &str) -> Result<ResolvedTableAccess, UcError> {
+async fn resolve_table_access(
+    cfg: &UcBootstrapConfig,
+    short_name: &str,
+) -> Result<ResolvedTableAccess, UcError> {
     if let Some(uri) = cfg.static_table_uri(short_name) {
         return Ok(ResolvedTableAccess {
             uri,
@@ -414,10 +414,7 @@ fn uc_rest_client() -> reqwest::Client {
     reqwest::Client::new()
 }
 
-fn uc_apply_auth(
-    cfg: &UcBootstrapConfig,
-    req: reqwest::RequestBuilder,
-) -> reqwest::RequestBuilder {
+fn uc_apply_auth(cfg: &UcBootstrapConfig, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     match cfg.uc_bearer_token.as_ref() {
         Some(token) if !token.is_empty() => req.bearer_auth(token),
         _ => req,
@@ -471,9 +468,10 @@ async fn resolve_table_access_via_uc(
         operation: "READ",
     };
     let creds_req = uc_apply_auth(cfg, client.post(&creds_url).json(&creds_req));
-    let creds_resp = creds_req.send().await.map_err(|e| {
-        UcError::Config(format!("uc temporary creds request {full_name}: {e}"))
-    })?;
+    let creds_resp = creds_req
+        .send()
+        .await
+        .map_err(|e| UcError::Config(format!("uc temporary creds request {full_name}: {e}")))?;
 
     let mut storage_options = cfg.storage_options.clone();
     match creds_resp.status() {
@@ -500,10 +498,7 @@ async fn resolve_table_access_via_uc(
     })
 }
 
-fn inject_vended_storage_options(
-    out: &mut HashMap<String, String>,
-    payload: UcTempCredsResponse,
-) {
+fn inject_vended_storage_options(out: &mut HashMap<String, String>, payload: UcTempCredsResponse) {
     if let Some(aws) = payload.aws_temp_credentials {
         if let Some(v) = aws.access_key_id {
             out.insert("AWS_ACCESS_KEY_ID".into(), v);
@@ -621,7 +616,13 @@ fn coerce_view_types(batch: RecordBatch) -> Result<RecordBatch, UcError> {
     let fields: Vec<Field> = schema
         .fields()
         .iter()
-        .map(|f| Field::new(f.name(), downgrade_view_type(f.data_type()), f.is_nullable()))
+        .map(|f| {
+            Field::new(
+                f.name(),
+                downgrade_view_type(f.data_type()),
+                f.is_nullable(),
+            )
+        })
         .collect();
     let target = Arc::new(Schema::new(fields));
 
@@ -719,11 +720,14 @@ fn col<'a>(
     table: &'static str,
     name: &'static str,
 ) -> Result<&'a dyn Array, UcError> {
-    batch.column_by_name(name).map(|c| c.as_ref()).ok_or_else(|| {
-        UcError::Config(format!(
-            "governance table `{table}` missing required column `{name}`"
-        ))
-    })
+    batch
+        .column_by_name(name)
+        .map(|c| c.as_ref())
+        .ok_or_else(|| {
+            UcError::Config(format!(
+                "governance table `{table}` missing required column `{name}`"
+            ))
+        })
 }
 
 fn optional_col<'a>(batch: &'a RecordBatch, name: &'static str) -> Option<&'a dyn Array> {
@@ -782,7 +786,8 @@ fn format_timestamp_value(arr: &dyn Array, idx: usize) -> Option<String> {
             let sub = (micros.rem_euclid(1_000_000)) as u32 * 1_000; // to ns
             let dt = time::OffsetDateTime::from_unix_timestamp(secs).ok()?;
             let dt = dt + time::Duration::nanoseconds(sub as i64);
-            dt.format(&time::format_description::well_known::Rfc3339).ok()
+            dt.format(&time::format_description::well_known::Rfc3339)
+                .ok()
         }
         DataType::Utf8 => {
             let s = arr.as_string::<i32>();
@@ -796,7 +801,11 @@ fn format_timestamp_value(arr: &dyn Array, idx: usize) -> Option<String> {
     }
 }
 
-fn get_optional_string_list(batch: &RecordBatch, name: &'static str, idx: usize) -> Option<Vec<String>> {
+fn get_optional_string_list(
+    batch: &RecordBatch,
+    name: &'static str,
+    idx: usize,
+) -> Option<Vec<String>> {
     let arr = optional_col(batch, name)?;
     let list = arr.as_any().downcast_ref::<ListArray>()?;
     if list.is_null(idx) {
@@ -834,7 +843,8 @@ fn arrow_to_policy_rows(batch: &RecordBatch) -> Result<Vec<PolicyRow>, UcError> 
     let version = as_int64(col(batch, tbl, "version")?, tbl, "version")?;
 
     let column = optional_col(batch, "column").and_then(|a| a.as_string_opt::<i32>().cloned());
-    let target_tag = optional_col(batch, "target_tag").and_then(|a| a.as_string_opt::<i32>().cloned());
+    let target_tag =
+        optional_col(batch, "target_tag").and_then(|a| a.as_string_opt::<i32>().cloned());
     let applies_to_tag =
         optional_col(batch, "applies_to_tag").and_then(|a| a.as_string_opt::<i32>().cloned());
     let description =
@@ -904,11 +914,23 @@ fn arrow_to_manifest_rows(batch: &RecordBatch) -> Result<Vec<ManifestRow>, UcErr
             version: version.value(i),
             compiler_version: compiler_version
                 .as_ref()
-                .map(|a| if a.is_null(i) { String::new() } else { a.value(i).to_string() })
+                .map(|a| {
+                    if a.is_null(i) {
+                        String::new()
+                    } else {
+                        a.value(i).to_string()
+                    }
+                })
                 .unwrap_or_default(),
             source_hash: source_hash
                 .as_ref()
-                .map(|a| if a.is_null(i) { String::new() } else { a.value(i).to_string() })
+                .map(|a| {
+                    if a.is_null(i) {
+                        String::new()
+                    } else {
+                        a.value(i).to_string()
+                    }
+                })
                 .unwrap_or_default(),
         });
     }
@@ -929,16 +951,14 @@ fn arrow_to_binding_rows(batch: &RecordBatch) -> Result<Vec<BindingRow>, UcError
     // `precedence` is INT (i32) per the DDL. Treat as optional in case
     // some deployments widened it to BIGINT; default 0 keeps the
     // resolver behaviour stable.
-    let precedence_i32 = optional_col(batch, "precedence")
-        .and_then(|a| match a.data_type() {
-            DataType::Int32 => Some(a.as_any().downcast_ref::<Int32Array>()?.clone()),
-            _ => None,
-        });
-    let precedence_i64 = optional_col(batch, "precedence")
-        .and_then(|a| match a.data_type() {
-            DataType::Int64 => Some(a.as_any().downcast_ref::<Int64Array>()?.clone()),
-            _ => None,
-        });
+    let precedence_i32 = optional_col(batch, "precedence").and_then(|a| match a.data_type() {
+        DataType::Int32 => Some(a.as_any().downcast_ref::<Int32Array>()?.clone()),
+        _ => None,
+    });
+    let precedence_i64 = optional_col(batch, "precedence").and_then(|a| match a.data_type() {
+        DataType::Int64 => Some(a.as_any().downcast_ref::<Int64Array>()?.clone()),
+        _ => None,
+    });
     if optional_col(batch, "precedence").is_some()
         && precedence_i32.is_none()
         && precedence_i64.is_none()
@@ -1061,8 +1081,7 @@ mod tests {
     }
 
     async fn write_delta(uri: &str, schema: Arc<Schema>, batch: RecordBatch) {
-        let delta_schema: deltalake::kernel::Schema =
-            schema.as_ref().try_into_kernel().unwrap();
+        let delta_schema: deltalake::kernel::Schema = schema.as_ref().try_into_kernel().unwrap();
         let table = CreateBuilder::new()
             .with_location(uri)
             .with_columns(delta_schema.fields().cloned())
@@ -1072,9 +1091,9 @@ mod tests {
             table.log_store(),
             Some(table.snapshot().unwrap().snapshot().clone()),
         )
-            .with_input_batches(vec![batch])
-            .await
-            .unwrap();
+        .with_input_batches(vec![batch])
+        .await
+        .unwrap();
     }
 
     /// Build a directory containing all four governance Delta tables
@@ -1107,10 +1126,7 @@ mod tests {
                 opt_str_array(&[None, Some("clinical")]),
                 opt_str_array(&[Some("pii"), None]),
                 str_array(&["permit", "permit"]),
-                list_str_array(&[
-                    Some(vec!["analyst"]),
-                    Some(vec!["analyst", "physician"]),
-                ]),
+                list_str_array(&[Some(vec!["analyst"]), Some(vec!["analyst", "physician"])]),
                 opt_str_array(&[Some("mask pii cols"), Some("regional row filter")]),
                 i64_array(&[1, 1]),
             ],
@@ -1306,10 +1322,7 @@ mod tests {
             State(root): State<std::path::PathBuf>,
             Path(full_name): Path<String>,
         ) -> Json<Value> {
-            let short = full_name
-                .rsplit('.')
-                .next()
-                .expect("table short name");
+            let short = full_name.rsplit('.').next().expect("table short name");
             let uri = root.join(short).to_string_lossy().to_string();
             Json(json!({
                 "table_id": format!("id-{short}"),
@@ -1432,7 +1445,10 @@ mod tests {
         let err = UcBootstrapBackend::bootstrap(test_config(&dir))
             .await
             .unwrap_err();
-        assert!(err.to_string().to_lowercase().contains("policies"), "err={err}");
+        assert!(
+            err.to_string().to_lowercase().contains("policies"),
+            "err={err}"
+        );
     }
 
     #[tokio::test]
@@ -1652,10 +1668,9 @@ mod tests {
 
         let mut cfg = test_config(&dir);
         cfg.refresh_interval = Some(Duration::from_millis(50));
-        let _backend =
-            UcBootstrapBackend::bootstrap_with_invalidation(cfg, notifier.sender())
-                .await
-                .unwrap();
+        let _backend = UcBootstrapBackend::bootstrap_with_invalidation(cfg, notifier.sender())
+            .await
+            .unwrap();
 
         // Poll up to 3s for the bundle cache to be invalidated.
         let mut cleared = false;

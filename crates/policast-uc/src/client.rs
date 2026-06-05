@@ -54,8 +54,8 @@ impl UcClientConfig {
 
     /// Read the signing secret from an environment variable.
     pub fn with_signing_secret_env(mut self, var: &str) -> Result<Self, UcError> {
-        let s = std::env::var(var)
-            .map_err(|_| UcError::Config(format!("env var {var} not set")))?;
+        let s =
+            std::env::var(var).map_err(|_| UcError::Config(format!("env var {var} not set")))?;
         self.signing_secret = s.into_bytes();
         Ok(self)
     }

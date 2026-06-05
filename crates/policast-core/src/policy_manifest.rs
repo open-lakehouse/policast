@@ -39,12 +39,8 @@ impl PolicyManifest {
     /// annotations on the Cedar policy (e.g. `@filter_type("row_filter")`
     /// and `@target_table("patients")`). The `principal_contract` footprint
     /// is recomputed across all policies after each batch.
-    pub fn compile_policies(
-        &mut self,
-        parsed: &[ParsedPolicy],
-    ) -> Result<(), PolicastError> {
-        let mut principal_attrs: BTreeSet<String> =
-            self.collected_principal_attrs();
+    pub fn compile_policies(&mut self, parsed: &[ParsedPolicy]) -> Result<(), PolicastError> {
+        let mut principal_attrs: BTreeSet<String> = self.collected_principal_attrs();
 
         for policy in parsed {
             let compiled = compile_single_policy(policy)?;
@@ -111,11 +107,7 @@ fn compile_single_policy(policy: &ParsedPolicy) -> Result<CompiledPolicy, Polica
     let effect = match policy.effect.as_str() {
         "permit" => Effect::Permit,
         "forbid" => Effect::Forbid,
-        other => {
-            return Err(PolicastError::CelEmit(format!(
-                "Unknown effect: {other}"
-            )))
-        }
+        other => return Err(PolicastError::CelEmit(format!("Unknown effect: {other}"))),
     };
 
     let filter_type = policy

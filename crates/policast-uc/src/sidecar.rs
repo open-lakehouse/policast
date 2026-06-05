@@ -42,10 +42,7 @@ pub fn router(state: SidecarState) -> Router {
 
 /// Convenience constructor: build a sidecar around a file-backed store
 /// at `store_root` using the given signing secret.
-pub fn file_sidecar(
-    store_root: impl AsRef<std::path::Path>,
-    secret: impl Into<Vec<u8>>,
-) -> Router {
+pub fn file_sidecar(store_root: impl AsRef<std::path::Path>, secret: impl Into<Vec<u8>>) -> Router {
     let backend: Arc<dyn ResolveBackend> = Arc::new(crate::backend::FileBackend::new(store_root));
     let core = Arc::new(ResolverCore::new(backend, secret.into()));
     router(SidecarState::new(core))
@@ -127,9 +124,7 @@ mod tests {
         let handle = tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
-        let resp = reqwest::get(format!("http://{addr}/health"))
-            .await
-            .unwrap();
+        let resp = reqwest::get(format!("http://{addr}/health")).await.unwrap();
         assert_eq!(resp.status(), 200);
         assert_eq!(resp.text().await.unwrap(), "ok");
         handle.abort();
@@ -263,9 +258,9 @@ mod tests {
                 table.log_store(),
                 Some(table.snapshot().unwrap().snapshot().clone()),
             )
-                .with_input_batches(vec![batch])
-                .await
-                .unwrap();
+            .with_input_batches(vec![batch])
+            .await
+            .unwrap();
         }
 
         let dir = tempfile::tempdir().unwrap();

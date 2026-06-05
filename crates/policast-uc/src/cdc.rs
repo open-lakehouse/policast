@@ -36,7 +36,10 @@ pub enum InvalidationEvent {
     /// policy id should be dropped. Currently we implement this by
     /// dropping all bundles whose target table matches, since policy
     /// ids are not stored on the cache key.
-    PolicyChanged { policy_id: String, target_table: Option<String> },
+    PolicyChanged {
+        policy_id: String,
+        target_table: Option<String>,
+    },
     /// A catch-all: invalidate everything (e.g. on compaction).
     InvalidateAll,
 }
@@ -147,7 +150,10 @@ mod tests {
         let k = CacheKey::new("patients", &principal("analyst"));
         cache.put(k.clone(), bundle());
         let notifier = InvalidationNotifier::new(cache.clone());
-        notifier.sender().send(InvalidationEvent::InvalidateAll).unwrap();
+        notifier
+            .sender()
+            .send(InvalidationEvent::InvalidateAll)
+            .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(cache.get(&k).is_none());
     }

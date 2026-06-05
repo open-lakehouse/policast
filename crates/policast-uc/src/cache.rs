@@ -98,7 +98,13 @@ impl BundleCache {
         let mut guard = self.inner.lock();
         let keys: Vec<CacheKey> = guard
             .iter()
-            .filter_map(|(k, _)| if k.table == table { Some(k.clone()) } else { None })
+            .filter_map(|(k, _)| {
+                if k.table == table {
+                    Some(k.clone())
+                } else {
+                    None
+                }
+            })
             .collect();
         for k in keys {
             guard.pop(&k);

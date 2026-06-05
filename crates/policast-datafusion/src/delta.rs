@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use datafusion::datasource::TableProvider;
-use deltalake::{ensure_table_uri, open_table};
 use deltalake::DeltaTable;
+use deltalake::{ensure_table_uri, open_table};
 
 use policast_core::PolicyManifest;
 

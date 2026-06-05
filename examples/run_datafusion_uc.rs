@@ -64,8 +64,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("examples/uc/store");
     let backend = Arc::new(FileBackend::new(store_root));
     let secret = b"policast-uc-demo-secret".to_vec();
-    let core = ResolverCore::new(backend, secret.clone())
-        .with_storage_uri_template(table_uri.clone());
+    let core =
+        ResolverCore::new(backend, secret.clone()).with_storage_uri_template(table_uri.clone());
 
     // ---------------------------------------------------------------
     // Step 3: Resolve for an analyst in us-east and show the filtered
@@ -88,14 +88,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  bundle.bindings_applied = {:?}",
         analyst_bundle.bindings_applied
     );
-    println!("  identity_claims        = {:?}\n", analyst_bundle.identity_claims);
+    println!(
+        "  identity_claims        = {:?}\n",
+        analyst_bundle.identity_claims
+    );
 
-    let governed_analyst = wrap_bundle(
-        analyst_bundle,
-        "patients",
-        UcTableOptions::default(),
-    )
-    .await?;
+    let governed_analyst =
+        wrap_bundle(analyst_bundle, "patients", UcTableOptions::default()).await?;
     let ctx = SessionContext::new();
     ctx.register_table("patients", Arc::new(governed_analyst))?;
     let df = ctx
@@ -124,7 +123,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  bundle.bindings_applied = {:?}",
         phys_bundle.bindings_applied
     );
-    println!("  identity_claims        = {:?}\n", phys_bundle.identity_claims);
+    println!(
+        "  identity_claims        = {:?}\n",
+        phys_bundle.identity_claims
+    );
 
     let governed_phys = wrap_bundle(phys_bundle, "patients", UcTableOptions::default()).await?;
     let ctx2 = SessionContext::new();
@@ -199,8 +201,11 @@ async fn seed_patients_delta(uri: &str) -> Result<(), Box<dyn std::error::Error>
         .with_columns(delta_schema.fields().cloned())
         .await?;
     // deltalake 0.32: WriteBuilder::new takes `Option<EagerSnapshot>`.
-    WriteBuilder::new(table.log_store(), Some(table.snapshot()?.snapshot().clone()))
-        .with_input_batches(vec![batch])
-        .await?;
+    WriteBuilder::new(
+        table.log_store(),
+        Some(table.snapshot()?.snapshot().clone()),
+    )
+    .with_input_batches(vec![batch])
+    .await?;
     Ok(())
 }

@@ -129,11 +129,7 @@ mod tests {
 
     fn contract() -> PrincipalContract {
         PrincipalContract {
-            required_attributes: vec![
-                "name".to_string(),
-                "region".to_string(),
-                "role".to_string(),
-            ],
+            required_attributes: vec!["name".to_string(), "region".to_string(), "role".to_string()],
         }
     }
 

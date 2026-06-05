@@ -59,7 +59,10 @@ pub fn render_scaffold(opts: &ScaffoldOptions) -> Result<String, PolicastError> 
 }
 
 fn render_row_filter(opts: &ScaffoldOptions) -> String {
-    let id = opts.id.clone().unwrap_or_else(|| "row_filter_new".to_string());
+    let id = opts
+        .id
+        .clone()
+        .unwrap_or_else(|| "row_filter_new".to_string());
     let mut out = String::new();
     push_header(&mut out, &id, "row_filter", opts);
     if !opts.roles.is_empty() {
@@ -158,9 +161,18 @@ mod tests {
 
     #[test]
     fn test_parse_profile_kind() {
-        assert_eq!(parse_profile_kind("row-filter").unwrap(), PolicyProfile::RowFilter);
-        assert_eq!(parse_profile_kind("column_mask").unwrap(), PolicyProfile::ColumnMask);
-        assert_eq!(parse_profile_kind("deny-override").unwrap(), PolicyProfile::DenyOverride);
+        assert_eq!(
+            parse_profile_kind("row-filter").unwrap(),
+            PolicyProfile::RowFilter
+        );
+        assert_eq!(
+            parse_profile_kind("column_mask").unwrap(),
+            PolicyProfile::ColumnMask
+        );
+        assert_eq!(
+            parse_profile_kind("deny-override").unwrap(),
+            PolicyProfile::DenyOverride
+        );
         assert!(parse_profile_kind("bogus").is_err());
     }
 

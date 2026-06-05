@@ -412,8 +412,7 @@ mod tests {
             "expected phi tag on diagnosis column, got: {tags:?}"
         );
         assert!(
-            tags.iter()
-                .any(|t| t.tag == "clinical" && t.is_table()),
+            tags.iter().any(|t| t.tag == "clinical" && t.is_table()),
             "expected clinical tag on the patients table, got: {tags:?}"
         );
     }

@@ -126,7 +126,8 @@ impl FileManifestStore {
 #[async_trait]
 impl PolicyStore for FileManifestStore {
     async fn resolve(&self, query: &PolicyQuery) -> Result<ResolvedPolicies, PolicastError> {
-        let matching: Vec<&CompiledPolicy> = self.manifest
+        let matching: Vec<&CompiledPolicy> = self
+            .manifest
             .policies
             .iter()
             .filter(|p| {
@@ -286,7 +287,10 @@ impl InMemoryCache {
 
     /// Number of (not-yet-evicted) entries currently held.
     pub fn len(&self) -> usize {
-        self.inner.lock().expect("InMemoryCache mutex poisoned").len()
+        self.inner
+            .lock()
+            .expect("InMemoryCache mutex poisoned")
+            .len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -544,8 +548,14 @@ mod tests {
     fn test_table_matches_exact_and_wildcard() {
         assert!(table_matches("*", "patients"));
         assert!(table_matches("patients", "patients"));
-        assert!(table_matches("hospital.clinical.*", "hospital.clinical.patients"));
-        assert!(!table_matches("hospital.foo.*", "hospital.clinical.patients"));
+        assert!(table_matches(
+            "hospital.clinical.*",
+            "hospital.clinical.patients"
+        ));
+        assert!(!table_matches(
+            "hospital.foo.*",
+            "hospital.clinical.patients"
+        ));
         assert!(table_matches("hospital.clinical.patients", "patients"));
         assert!(table_matches("patients", "hospital.clinical.patients"));
         assert!(!table_matches("orders", "patients"));
@@ -640,10 +650,6 @@ mod tests {
                 calls: Arc::new(AtomicUsize::new(0)),
             }
         }
-
-        fn count(&self) -> usize {
-            self.calls.load(Ordering::SeqCst)
-        }
     }
 
     #[async_trait]
@@ -654,6 +660,7 @@ mod tests {
                 manifest: PolicyManifest {
                     version: "1.0".into(),
                     policies: vec![policy("p1", "patients", None)],
+                    principal_contract: None,
                 },
                 identity_claims: Default::default(),
                 bindings_applied: vec!["p1".into()],
@@ -691,12 +698,18 @@ mod tests {
     #[test]
     fn test_resolved_cache_key_is_sensitive_to_each_field() {
         let base = resolved_cache_key(&query("patients", "analyst", "alice"));
-        assert_ne!(base, resolved_cache_key(&query("orders", "analyst", "alice")));
+        assert_ne!(
+            base,
+            resolved_cache_key(&query("orders", "analyst", "alice"))
+        );
         assert_ne!(
             base,
             resolved_cache_key(&query("patients", "physician", "alice"))
         );
-        assert_ne!(base, resolved_cache_key(&query("patients", "analyst", "bob")));
+        assert_ne!(
+            base,
+            resolved_cache_key(&query("patients", "analyst", "bob"))
+        );
     }
 
     #[test]
@@ -720,7 +733,11 @@ mod tests {
 
         assert_eq!(first.manifest.policies.len(), 1);
         assert_eq!(second.manifest.policies.len(), 1);
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "second call should be served from cache");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "second call should be served from cache"
+        );
         assert_eq!(cached.cache().len(), 1);
     }
 
@@ -730,8 +747,14 @@ mod tests {
         let calls = inner.calls.clone();
         let cached = CachedPolicyStore::new(inner, InMemoryCache::new(), Duration::from_secs(60));
 
-        cached.resolve(&query("patients", "analyst", "alice")).await.unwrap();
-        cached.resolve(&query("patients", "analyst", "bob")).await.unwrap();
+        cached
+            .resolve(&query("patients", "analyst", "alice"))
+            .await
+            .unwrap();
+        cached
+            .resolve(&query("patients", "analyst", "bob"))
+            .await
+            .unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(cached.cache().len(), 2);
@@ -762,7 +785,10 @@ mod tests {
         let cached = CachedPolicyStore::new(inner, FailingCache, Duration::from_secs(60));
 
         let resolved = cached.resolve(&query("patients", "analyst", "alice")).await;
-        assert!(resolved.is_ok(), "cache errors should fall back to inner store");
+        assert!(
+            resolved.is_ok(),
+            "cache errors should fall back to inner store"
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
@@ -786,15 +812,32 @@ mod tests {
             manifest: PolicyManifest {
                 version: "1.0".into(),
                 policies: vec![policy("p1", "patients", None)],
+                principal_contract: None,
             },
             identity_claims: Default::default(),
             bindings_applied: vec!["p1".into()],
         };
 
-        cache.put("k", &value, Duration::from_secs(60)).await.unwrap();
-        assert_eq!(cache.get("k").await.unwrap().unwrap().manifest.policies.len(), 1);
+        cache
+            .put("k", &value, Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(
+            cache
+                .get("k")
+                .await
+                .unwrap()
+                .unwrap()
+                .manifest
+                .policies
+                .len(),
+            1
+        );
 
-        cache.put("k2", &value, Duration::from_millis(1)).await.unwrap();
+        cache
+            .put("k2", &value, Duration::from_millis(1))
+            .await
+            .unwrap();
         std::thread::sleep(Duration::from_millis(10));
         assert!(cache.get("k2").await.unwrap().is_none());
         assert!(!cache.is_empty(), "the non-expired key should remain");
@@ -818,13 +861,21 @@ mod tests {
             manifest: PolicyManifest {
                 version: "1.0".into(),
                 policies: vec![policy("p1", "patients", None)],
+                principal_contract: None,
             },
             identity_claims: Default::default(),
             bindings_applied: vec!["p1".into()],
         };
         let key = resolved_cache_key(&query("patients", "analyst", "redis-test"));
-        cache.put(&key, &value, Duration::from_secs(30)).await.unwrap();
-        let got = cache.get(&key).await.unwrap().expect("entry should be present");
+        cache
+            .put(&key, &value, Duration::from_secs(30))
+            .await
+            .unwrap();
+        let got = cache
+            .get(&key)
+            .await
+            .unwrap()
+            .expect("entry should be present");
         assert_eq!(got.manifest.policies[0].id, "p1");
     }
 }

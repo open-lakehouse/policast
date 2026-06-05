@@ -13,11 +13,11 @@ pub use codegen::{render_identity, IdentityLang};
 pub use error::PolicastError;
 pub use model::{CompiledPolicy, Effect, FilterType, PrincipalContract};
 pub use policy_manifest::PolicyManifest;
-pub use profile::{PolicyProfile, CANONICAL_PRINCIPAL_ATTRS};
-pub use scaffold::{parse_profile_kind, render_scaffold, ScaffoldOptions};
+#[cfg(feature = "redis")]
+pub use policy_store::RedisCache;
 pub use policy_store::{
     CacheFailMode, CachedPolicyStore, FileManifestStore, InMemoryCache, PolicyQuery, PolicyStore,
     ResolvedCache, ResolvedPolicies,
 };
-#[cfg(feature = "redis")]
-pub use policy_store::RedisCache;
+pub use profile::{PolicyProfile, CANONICAL_PRINCIPAL_ATTRS};
+pub use scaffold::{parse_profile_kind, render_scaffold, ScaffoldOptions};

@@ -17,7 +17,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{
-    builder::{Int32Builder, Int64Builder, ListBuilder, StringBuilder, TimestampMicrosecondBuilder},
+    builder::{
+        Int32Builder, Int64Builder, ListBuilder, StringBuilder, TimestampMicrosecondBuilder,
+    },
     ArrayRef,
 };
 use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
@@ -129,11 +131,7 @@ pub struct SeedReport {
     pub tags: usize,
 }
 
-async fn write_table(
-    cfg: &SeedConfig,
-    name: &str,
-    batch: RecordBatch,
-) -> Result<(), UcError> {
+async fn write_table(cfg: &SeedConfig, name: &str, batch: RecordBatch) -> Result<(), UcError> {
     let uri = cfg.table_uri(name);
     let arrow_schema = batch.schema();
     let delta_schema: StructType = arrow_schema.as_ref().try_into_kernel().map_err(|e| {
@@ -165,9 +163,7 @@ async fn write_table(
                 .with_input_batches(vec![batch])
                 .await
                 .map_err(|e| {
-                    UcError::Config(format!(
-                        "seed: append to existing `{uri}` failed: {e}"
-                    ))
+                    UcError::Config(format!("seed: append to existing `{uri}` failed: {e}"))
                 })?;
         }
         Err(ref e) if is_table_not_found(e) => {
@@ -176,11 +172,7 @@ async fn write_table(
                 .with_storage_options(cfg.storage_options.clone())
                 .with_columns(delta_schema.fields().cloned())
                 .await
-                .map_err(|e| {
-                    UcError::Config(format!(
-                        "seed: create `{uri}` failed: {e}"
-                    ))
-                })?;
+                .map_err(|e| UcError::Config(format!("seed: create `{uri}` failed: {e}")))?;
             let eager = table
                 .snapshot()
                 .map_err(|e| UcError::Config(format!("seed: snapshot `{uri}` failed: {e}")))?
@@ -190,9 +182,7 @@ async fn write_table(
                 .with_input_batches(vec![batch])
                 .await
                 .map_err(|e| {
-                    UcError::Config(format!(
-                        "seed: initial write to `{uri}` failed: {e}"
-                    ))
+                    UcError::Config(format!("seed: initial write to `{uri}` failed: {e}"))
                 })?;
         }
         Err(e) => {
@@ -446,7 +436,7 @@ fn parse_ts_micros(s: &str) -> Option<i64> {
     let ss: u32 = ss_and_frac.split('.').next()?.parse().ok()?;
     // naive UTC -> micros via a tiny portable routine.
     let days = days_from_civil(y, m, d);
-    let secs = days as i64 * 86_400 + hh as i64 * 3_600 + mm as i64 * 60 + ss as i64;
+    let secs = days * 86_400 + hh as i64 * 3_600 + mm as i64 * 60 + ss as i64;
     Some(secs * 1_000_000)
 }
 
@@ -495,8 +485,8 @@ mod tests {
         assert!(report.bindings > 0, "shipped store has bindings");
         assert!(report.tags > 0, "shipped store has tags");
 
-        let mut boot_cfg = UcBootstrapConfig::for_example_stack("http://uc")
-            .with_storage_uri_template(&template);
+        let mut boot_cfg =
+            UcBootstrapConfig::for_example_stack("http://uc").with_storage_uri_template(&template);
         boot_cfg.refresh_interval = None;
         let boot = UcBootstrapBackend::bootstrap(boot_cfg)
             .await

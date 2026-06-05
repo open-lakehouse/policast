@@ -109,7 +109,12 @@ pub async fn wrap_bundle(
     let identity = identity_from_bundle(&bundle);
 
     let manifest: PolicyManifest = bundle.compiled_manifest;
-    Ok(GovernedTable::new(provider, manifest, table.to_string(), identity))
+    Ok(GovernedTable::new(
+        provider,
+        manifest,
+        table.to_string(),
+        identity,
+    ))
 }
 
 /// Construct a `QueryIdentity` from a bundle's `identity_claims`,
@@ -141,10 +146,7 @@ mod tests {
     use policast_core::PolicyManifest;
     use policast_uc::types::ResolveBundle;
 
-    fn bundle_with_claims(
-        claims: &[(&str, &str)],
-        uri: Option<&str>,
-    ) -> ResolveBundle {
+    fn bundle_with_claims(claims: &[(&str, &str)], uri: Option<&str>) -> ResolveBundle {
         let identity_claims = claims
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -194,10 +196,7 @@ mod tests {
 
     #[test]
     fn test_identity_empty_strings_become_none() {
-        let bundle = bundle_with_claims(
-            &[("role", "analyst"), ("region", ""), ("name", "")],
-            None,
-        );
+        let bundle = bundle_with_claims(&[("role", "analyst"), ("region", ""), ("name", "")], None);
         let id = identity_from_bundle(&bundle);
         assert_eq!(id.region, None);
         assert_eq!(id.name, None);
