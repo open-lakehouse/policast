@@ -269,6 +269,11 @@ metals.sbt
 # IntelliJ
 .idea/
 
+# Docker: CI-only staging dir for the prebuilt policast-spark assembly jar
+# (see the spark-prebuilt stage in docker/Dockerfile). Never committed; the CI
+# smoke job populates it from the `spark` job's artifact.
+docker/prebuilt/
+
 # Cargo: keep the directory shape so `COPY .cargo` in docker/Dockerfile
 # still resolves on a fresh clone, but never commit a populated config
 # (proxy URLs, tokens, etc) or local cache state.

@@ -108,6 +108,7 @@ The project is designed to produce governance that works across three catalog sy
 - **Testing**: every code change must be accompanied by tests; target ~80% coverage.
 - **Policy files**: Cedar policies live in `examples/policies/`; compiled manifests are JSON.
 - **Feature gates**: Delta Lake support is behind the `delta` Cargo feature in `policast-datafusion`.
+- **CI**: `lint` + `rust` + `spark` run on every PR and are the **required** checks for `main`; the full docker `smoke` is **advisory** and opt-in (push to `main`, nightly, `workflow_dispatch`, or a `run-smoke` PR label). See [`docs/ci.md`](docs/ci.md) for the matrix, artifact reuse, and branch-protection setup.
 
 ## Current state
 

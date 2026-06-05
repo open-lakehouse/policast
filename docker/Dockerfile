@@ -11,11 +11,27 @@
 #
 # Build each via:
 #   docker build --target <name> -t policast-<name> -f docker/Dockerfile .
+#
+# The spark-demo runtime takes its assembly jar from a selectable source stage
+# (ARG SPARK_JAR_STAGE, default `spark-build`):
+#   - SPARK_JAR_STAGE=spark-build    builds the jar from source with sbt
+#                                    (the default; `just spark-demo` locally).
+#   - SPARK_JAR_STAGE=spark-prebuilt copies a jar already staged into the build
+#                                    context at POLICAST_SPARK_JAR_PATH, so CI
+#                                    can reuse the `spark` job's artifact instead
+#                                    of re-running sbt in Docker. The sbt
+#                                    spark-build stage is skipped entirely in
+#                                    that mode.
 
 ########################
 # 1. Common Rust builder
 ########################
 ARG RUST_VERSION=1.96
+# Source stage for the policast-spark assembly jar consumed by the spark-demo
+# runtime (see stages 7b/7c). Global ARG so it can be referenced in a later
+# FROM. Default `spark-build` assembles from source with sbt; CI overrides to
+# `spark-prebuilt` to reuse a staged artifact.
+ARG SPARK_JAR_STAGE=spark-build
 FROM rust:${RUST_VERSION}-slim-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -194,6 +210,33 @@ RUN set -eux; \
     sbt assembly
 
 ###############################################
+# 7b. Prebuilt jar ingest stage (CI artifact reuse)
+#
+# Used when the assembly jar already exists (e.g. CI downloaded the `spark`
+# job's `policast-spark-assembly` artifact and staged it into the build
+# context). Selecting this stage via `--build-arg SPARK_JAR_STAGE=spark-prebuilt`
+# skips the sbt spark-build stage entirely. The jar must be present at
+# POLICAST_SPARK_JAR_PATH (relative to the build context) — but because BuildKit
+# only builds stages reachable from the final target, this COPY is never
+# evaluated under the default SPARK_JAR_STAGE=spark-build, so a from-source build
+# (`just spark-demo` locally) does NOT require the file to exist.
+###############################################
+FROM busybox:1.36 AS spark-prebuilt
+ARG POLICAST_SPARK_JAR_PATH=docker/prebuilt/policast-spark-assembly.jar
+# Normalize to the same path/name the sbt spark-build stage produces so the
+# downstream COPY is identical regardless of which source stage is selected.
+COPY ${POLICAST_SPARK_JAR_PATH} /build/target/scala-2.13/policast-spark-assembly-0.1.0.jar
+
+###############################################
+# 7c. Assembly jar source selector
+#
+# Resolves to `spark-build` (sbt from source) by default, or `spark-prebuilt`
+# (reuse a staged jar) when the global SPARK_JAR_STAGE arg (declared at the top
+# of this file) is overridden.
+###############################################
+FROM ${SPARK_JAR_STAGE} AS spark-jar
+
+###############################################
 # 8. Spark demo runtime (Spark 4.1, Scala 2.13, Java 17)
 ###############################################
 FROM eclipse-temurin:17-jre-jammy AS spark-demo
@@ -211,7 +254,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
        | tar -xz -C /opt \
     && ln -s "/opt/spark-${SPARK_VERSION}-bin-hadoop3" /opt/spark
 
-COPY --from=spark-build /build/target/scala-2.13/policast-spark-assembly-0.1.0.jar \
+COPY --from=spark-jar /build/target/scala-2.13/policast-spark-assembly-0.1.0.jar \
      /opt/policast/policast-spark-assembly.jar
 # Ship the pre-expanded manifest + sample data the plugin enforces against.
 # Spark has no tag-expansion step (the resolver sidecar does that for the
