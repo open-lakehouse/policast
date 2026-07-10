@@ -186,8 +186,7 @@ impl PolicyEditor {
     }
 
     async fn append_batch(&self, short_name: &str, batch: RecordBatch) -> Result<(), UcError> {
-        let access =
-            resolve_table_access(&self.cfg, short_name, TableOperation::ReadWrite).await?;
+        let access = resolve_table_access(&self.cfg, short_name, TableOperation::ReadWrite).await?;
         let url = ensure_table_uri(&access.uri)
             .map_err(|e| UcError::Config(format!("edit: bad uri for {short_name}: {e}")))?;
         let table = open_table_with_storage_options(url, access.storage_options.clone())
@@ -589,8 +588,8 @@ mod tests {
 
     fn editor_for(dir: &std::path::Path) -> (PolicyEditor, String) {
         let template = format!("{}/{{table}}", dir.to_str().unwrap());
-        let cfg = UcBootstrapConfig::for_example_stack("http://uc")
-            .with_storage_uri_template(&template);
+        let cfg =
+            UcBootstrapConfig::for_example_stack("http://uc").with_storage_uri_template(&template);
         (PolicyEditor::new(cfg, DEFAULT_ADMIN_ROLE), template)
     }
 

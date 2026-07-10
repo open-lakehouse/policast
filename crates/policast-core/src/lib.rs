@@ -15,8 +15,6 @@ pub use codegen::{render_identity, IdentityLang};
 pub use error::PolicastError;
 pub use model::{CompiledPolicy, Effect, FilterType, PrincipalContract};
 pub use policy_manifest::PolicyManifest;
-#[cfg(feature = "proto")]
-pub use proto::ProtoError;
 #[cfg(feature = "redis")]
 pub use policy_store::RedisCache;
 pub use policy_store::{
@@ -24,4 +22,6 @@ pub use policy_store::{
     ResolvedCache, ResolvedPolicies,
 };
 pub use profile::{PolicyProfile, CANONICAL_PRINCIPAL_ATTRS};
+#[cfg(feature = "proto")]
+pub use proto::ProtoError;
 pub use scaffold::{parse_profile_kind, render_scaffold, ScaffoldOptions};

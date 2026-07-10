@@ -227,7 +227,10 @@ impl UcRestClient {
         full_name: &str,
         operation: TableOperation,
     ) -> Result<VendOutcome, UcError> {
-        let url = format!("{}{CATALOG_BASE}/temporary-table-credentials", self.base_url);
+        let url = format!(
+            "{}{CATALOG_BASE}/temporary-table-credentials",
+            self.base_url
+        );
         let body = UcTempCredsRequest {
             table_id,
             table_name: full_name,
@@ -334,7 +337,10 @@ mod tests {
 
     #[test]
     fn test_auth_mode_from_flag() {
-        assert_eq!(AuthMode::from_flag(false, None).unwrap(), AuthMode::Disabled);
+        assert_eq!(
+            AuthMode::from_flag(false, None).unwrap(),
+            AuthMode::Disabled
+        );
         assert_eq!(
             AuthMode::from_flag(false, Some("tok".into())).unwrap(),
             AuthMode::Disabled

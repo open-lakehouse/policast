@@ -230,7 +230,10 @@ mod editor_api {
         Path(_id): Path<String>,
         Json(req): Json<ValidateRequest>,
     ) -> Result<JsonResponse<ValidateResponse>, SidecarError> {
-        let doc = state.editor.validate(&req.cedar).map_err(SidecarError::from)?;
+        let doc = state
+            .editor
+            .validate(&req.cedar)
+            .map_err(SidecarError::from)?;
         Ok(JsonResponse(ValidateResponse {
             policy_id: doc.policy.id,
             owner: doc.owner,
@@ -618,9 +621,15 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let template = format!("{}/{{table}}", dir.path().to_str().unwrap());
-        seed_editable_tables(&template, "rf", V1, Some("alice@hospital.com"), "alice@hospital.com")
-            .await
-            .unwrap();
+        seed_editable_tables(
+            &template,
+            "rf",
+            V1,
+            Some("alice@hospital.com"),
+            "alice@hospital.com",
+        )
+        .await
+        .unwrap();
 
         let cfg =
             UcBootstrapConfig::for_example_stack("http://uc").with_storage_uri_template(&template);

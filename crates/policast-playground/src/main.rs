@@ -32,7 +32,10 @@ enum AuthToggle {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "policast-playground", about = "Governed-query policy playground")]
+#[command(
+    name = "policast-playground",
+    about = "Governed-query policy playground"
+)]
 struct Cli {
     /// `host:port` to listen on.
     #[arg(long, default_value = "127.0.0.1:8088")]

@@ -189,16 +189,16 @@ pub async fn execute(params: ExecuteParams<'_>) -> Result<QueryResult, Playgroun
         .collect();
 
     // Open the backing Delta table.
-    let table_url = ensure_table_uri(params.table_uri)
-        .map_err(|e| PlaygroundError::Delta(format!("ensure_table_uri {}: {e}", params.table_uri)))?;
+    let table_url = ensure_table_uri(params.table_uri).map_err(|e| {
+        PlaygroundError::Delta(format!("ensure_table_uri {}: {e}", params.table_uri))
+    })?;
     let delta = open_table_with_storage_options(table_url, params.storage_options.clone())
         .await
         .map_err(|e| PlaygroundError::Delta(format!("open {}: {e}", params.table_uri)))?;
-    let provider = delta
-        .table_provider()
-        .build()
-        .await
-        .map_err(|e| PlaygroundError::Delta(format!("table_provider {}: {e}", params.table_uri)))?;
+    let provider =
+        delta.table_provider().build().await.map_err(|e| {
+            PlaygroundError::Delta(format!("table_provider {}: {e}", params.table_uri))
+        })?;
 
     let identity = identity_for(params.principal);
     let governed = GovernedTable::new(
@@ -215,7 +215,11 @@ pub async fn execute(params: ExecuteParams<'_>) -> Result<QueryResult, Playgroun
 
     // Per-query session: classic Utf8 layouts keep masks/filters simple.
     let mut config = SessionConfig::new();
-    config.options_mut().execution.parquet.schema_force_view_types = false;
+    config
+        .options_mut()
+        .execution
+        .parquet
+        .schema_force_view_types = false;
     let ctx = SessionContext::new_with_config(config);
 
     for f in params.functions {

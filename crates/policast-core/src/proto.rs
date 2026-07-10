@@ -117,7 +117,10 @@ impl From<&PolicyManifest> for v1::PolicyManifest {
         v1::PolicyManifest {
             version: m.version.clone(),
             policies: m.policies.iter().map(v1::CompiledPolicy::from).collect(),
-            principal_contract: m.principal_contract.as_ref().map(v1::PrincipalContract::from),
+            principal_contract: m
+                .principal_contract
+                .as_ref()
+                .map(v1::PrincipalContract::from),
             manifest_schema_version: MANIFEST_SCHEMA_VERSION,
         }
     }
@@ -335,7 +338,13 @@ mod tests {
         let bytes = proto.encode_to_vec();
         let err = PolicyManifest::from_protobuf(&bytes).unwrap_err();
         assert!(
-            matches!(err, ProtoError::UnspecifiedEnum { kind: "filter_type", .. }),
+            matches!(
+                err,
+                ProtoError::UnspecifiedEnum {
+                    kind: "filter_type",
+                    ..
+                }
+            ),
             "expected fail-closed on unspecified filter_type, got {err:?}"
         );
     }

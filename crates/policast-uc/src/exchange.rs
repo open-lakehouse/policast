@@ -156,7 +156,10 @@ mod tests {
 
     #[test]
     fn test_compile_single_rejects_multi_policy() {
-        let two = format!("{ROW_FILTER}\n{}", ROW_FILTER.replace("region", "physician"));
+        let two = format!(
+            "{ROW_FILTER}\n{}",
+            ROW_FILTER.replace("region", "physician")
+        );
         let err = compile_single(&two).unwrap_err();
         assert!(err.to_string().contains("exactly one"));
     }

@@ -217,8 +217,14 @@ mod tests {
     #[tokio::test]
     async fn registers_and_runs_int_function() {
         let ctx = SessionContext::new();
-        register_sql_function(&ctx, "addone", &[("x".into(), "INT".into())], "INT", "x + 1")
-            .unwrap();
+        register_sql_function(
+            &ctx,
+            "addone",
+            &[("x".into(), "INT".into())],
+            "INT",
+            "x + 1",
+        )
+        .unwrap();
         let batches = run_scalar(&ctx, "SELECT addone(41) AS r").await;
         let col = batches[0]
             .column(0)

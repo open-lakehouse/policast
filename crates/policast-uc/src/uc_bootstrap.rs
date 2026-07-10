@@ -348,7 +348,10 @@ pub async fn run_materialize_loop(
         }
         match backend.materialize_into(&store).await {
             Ok(tables) => {
-                eprintln!("[uc-bootstrap] materialized {} table(s) to redis", tables.len());
+                eprintln!(
+                    "[uc-bootstrap] materialized {} table(s) to redis",
+                    tables.len()
+                );
             }
             Err(e) => {
                 eprintln!("[uc-bootstrap] materialize failed ({e}); keeping previous redis state");
