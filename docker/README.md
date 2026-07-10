@@ -13,6 +13,7 @@ sidecar, and the DataFusion enforcement path.
 | `spark-demo` | `spark` | one-shot | Runs the `RunSpark` example on a Spark 4.1 runtime (Scala 2.13, Java 17); the plugin enforces the compiled manifest via Catalyst rules (no sidecar) |
 | `compile` | `tools` | one-shot | Runs `scripts/compile-policies.sh` to (re)build `examples/policies/manifest.json` |
 | `df-shell` | `shell` | interactive | Rust toolchain + workspace mounted at `/workspace` for ad-hoc `cargo run --example ...` |
+| `playground` | `playground` | long-running | Governed-query policy playground (`policast-playground`) on `:8088` — SPA + `POST /api/query`; `--demo-table` seeds a self-contained patients Delta table so it works with no UC |
 | `unitycatalog` | `uc-oss` | long-running | Upstream Unity Catalog OSS image — staged only, not yet wired to the sidecar |
 
 ## Quickstart
@@ -108,6 +109,39 @@ roles.
 > against the UC name and registering the `GovernedTable` under the
 > short name (derived from `POLICAST_TABLE` or overridden via
 > `POLICAST_GOVERNED_NAME`).
+
+## Policy playground
+
+The `playground` profile runs the governed-query playground — a UI to load Cedar
+policies, pick a principal, optionally register Unity Catalog SQL functions as
+DataFusion UDFs, run SQL, and see the **governed** result (row filters + column
+masks via `GovernedTable`).
+
+```bash
+just playground-up      # build + start, waits for healthy, prints the URL
+# → playground UI ready → http://127.0.0.1:8088
+just playground-logs    # tail logs
+just playground-down    # stop (keeps the demo-table volume)
+```
+
+Or with raw compose:
+
+```bash
+docker compose --profile playground up -d --build playground
+```
+
+`--demo-table file:///data/playground/patients` (baked into the service command)
+seeds a self-contained `hospital.clinical.patients` Delta table into the
+`playground-data` volume and registers it as a local table, so the UI works with
+**no Unity Catalog**. Open http://127.0.0.1:8088, keep the prefilled policies +
+SQL, and Run: an `analyst` in `us-east` sees only `us-east` rows with `ssn` /
+`diagnosis` masked; switch the role to `admin` to see everything.
+
+To test against a real catalog instead, override the command to drop
+`--demo-table` and pass `--uc-endpoint` / `--uc-auth enable`
+`--uc-bearer-token-env UC_TOKEN` (hosted) or `--uc-endpoint http://unitycatalog:8080`
+`--uc-auth disable` plus `--uc-storage-option` entries (local MinIO). The table
+must exist in that catalog with a `storage_location` the playground can read.
 
 ## Spark enforcement path
 

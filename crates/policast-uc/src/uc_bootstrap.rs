@@ -23,8 +23,9 @@
 //!
 //! The eventual production path is to ask UC's REST API for a vended
 //! credential per governance table — that is what the `uc_endpoint` +
-//! `uc_bearer_token` fields on [`UcBootstrapConfig`] are for. This
-//! commit wires the simpler **static storage** path: the config
+//! `auth` fields on [`UcBootstrapConfig`] are for (the REST plumbing
+//! lives in [`crate::uc_rest::UcRestClient`]). This commit wires the
+//! simpler **static storage** path: the config
 //! carries a URI template (e.g. `s3://policast-demo/governance/policast/{table}`)
 //! plus a map of `storage_options` that delta-rs forwards to its
 //! object_store backend. That is enough for the MinIO compose demo
@@ -42,7 +43,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::RwLock;
-use serde::Deserialize;
 use tokio::task::AbortHandle;
 
 use datafusion::arrow::array::{
@@ -53,11 +53,11 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::prelude::SessionContext;
 use deltalake::{ensure_table_uri, open_table_with_storage_options};
-use reqwest::StatusCode;
 
 use crate::backend::{BindingRow, ManifestRow, PolicyRow, ResolveBackend, TagRow};
 use crate::cdc::{InvalidationEvent, InvalidationSender};
 use crate::error::UcError;
+use crate::uc_rest::{AuthMode, ResolvedTableAccess, TableOperation, UcRestClient};
 
 /// Configuration knobs for [`UcBootstrapBackend`].
 ///
@@ -89,10 +89,11 @@ pub struct UcBootstrapConfig {
     /// on-demand [`UcBootstrapBackend::refresh_snapshot`] instead.
     pub refresh_interval: Option<Duration>,
 
-    /// Optional bearer token for the UC REST endpoint. If unset, REST
-    /// calls are sent without an Authorization header (handy for local
-    /// demos with no auth gateway in front).
-    pub uc_bearer_token: Option<String>,
+    /// Authentication mode for UC REST calls. [`AuthMode::Disabled`]
+    /// (the default) sends no `Authorization` header — the local docker
+    /// path. [`AuthMode::Bearer`] attaches a static bearer token — the
+    /// hosted-UC path.
+    pub auth: AuthMode,
 
     /// URI template for the four governance Delta tables. The literal
     /// substring `{table}` is replaced with `policies`, `manifest`,
@@ -121,7 +122,7 @@ impl UcBootstrapConfig {
             governance_catalog: "governance".into(),
             governance_schema: "policast".into(),
             refresh_interval: Some(Duration::from_secs(30)),
-            uc_bearer_token: None,
+            auth: AuthMode::Disabled,
             storage_uri_template: None,
             storage_options: HashMap::new(),
         }
@@ -140,9 +141,16 @@ impl UcBootstrapConfig {
         self
     }
 
-    /// Set bearer token for UC REST calls.
+    /// Set the authentication mode for UC REST calls.
+    pub fn with_auth(mut self, auth: AuthMode) -> Self {
+        self.auth = auth;
+        self
+    }
+
+    /// Convenience: set a static bearer token (equivalent to
+    /// `with_auth(AuthMode::Bearer(token))`).
     pub fn with_uc_bearer_token(mut self, token: impl Into<String>) -> Self {
-        self.uc_bearer_token = Some(token.into());
+        self.auth = AuthMode::Bearer(token.into());
         self
     }
 
@@ -299,6 +307,57 @@ impl UcBootstrapBackend {
             .map(|g| !g.abort.is_finished())
             .unwrap_or(false)
     }
+
+    /// Recompile every concrete table's manifest from the current
+    /// snapshot and write them into the materialized Redis store.
+    ///
+    /// This is the "flush UC updates into the PolicyStore" step: call it
+    /// after [`refresh_snapshot`](Self::refresh_snapshot) so a policy
+    /// edit in Unity Catalog propagates into the serving store. Returns
+    /// the list of tables written.
+    #[cfg(feature = "redis")]
+    pub async fn materialize_into(
+        &self,
+        store: &crate::redis_store::RedisManifestStore,
+    ) -> Result<Vec<String>, UcError> {
+        let core = crate::store::ResolverCore::new(Arc::new(self.clone()), Vec::<u8>::new());
+        store.materialize(&core).await
+    }
+}
+
+/// Background loop that flushes UC governance updates into a
+/// materialized Redis [`RedisManifestStore`]: every `interval` it
+/// refreshes the snapshot and re-materializes the per-table manifests.
+///
+/// Pair it with the resolver's `RedisFirstPolicyStore` so engines serve
+/// from Redis with an in-memory fallback. Runs forever; spawn it on a
+/// tokio task and drop the handle to stop.
+///
+/// [`RedisManifestStore`]: crate::redis_store::RedisManifestStore
+#[cfg(feature = "redis")]
+pub async fn run_materialize_loop(
+    backend: UcBootstrapBackend,
+    store: crate::redis_store::RedisManifestStore,
+    interval: Duration,
+) {
+    loop {
+        tokio::time::sleep(interval).await;
+        if let Err(e) = backend.refresh_snapshot().await {
+            eprintln!("[uc-bootstrap] materialize refresh failed ({e}); will retry");
+            continue;
+        }
+        match backend.materialize_into(&store).await {
+            Ok(tables) => {
+                eprintln!(
+                    "[uc-bootstrap] materialized {} table(s) to redis",
+                    tables.len()
+                );
+            }
+            Err(e) => {
+                eprintln!("[uc-bootstrap] materialize failed ({e}); keeping previous redis state");
+            }
+        }
+    }
 }
 
 async fn refresh_into(
@@ -326,7 +385,7 @@ async fn load_required<R, F>(
 where
     F: Fn(&RecordBatch) -> Result<Vec<R>, UcError>,
 {
-    let access = resolve_table_access(cfg, name).await?;
+    let access = resolve_table_access(cfg, name, TableOperation::Read).await?;
     let batches = scan_delta_table(&access.uri, &access.storage_options).await?;
     flatten_batches(&batches, convert)
 }
@@ -339,7 +398,7 @@ async fn load_optional<R, F>(
 where
     F: Fn(&RecordBatch) -> Result<Vec<R>, UcError>,
 {
-    let access = resolve_table_access(cfg, name).await?;
+    let access = resolve_table_access(cfg, name, TableOperation::Read).await?;
     match scan_delta_table(&access.uri, &access.storage_options).await {
         Ok(batches) => flatten_batches(&batches, convert),
         Err(e) if is_table_not_found(&e) => Ok(Vec::new()),
@@ -347,174 +406,32 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-struct ResolvedTableAccess {
-    uri: String,
-    storage_options: HashMap<String, String>,
-}
-
 /// Resolve table access in one of two modes:
 ///
 /// 1) Static mode (`storage_uri_template` is set): URI comes from the
 ///    template and options are `cfg.storage_options`.
 /// 2) UC-vended mode (`storage_uri_template` unset): call UC REST for
-///    table metadata + temporary table credentials.
-async fn resolve_table_access(
+///    table metadata + temporary table credentials via [`UcRestClient`]
+///    for `operation` (`READ` for the resolver snapshot, `READ_WRITE`
+///    for the editor's write-back).
+pub(crate) async fn resolve_table_access(
     cfg: &UcBootstrapConfig,
     short_name: &str,
+    operation: TableOperation,
 ) -> Result<ResolvedTableAccess, UcError> {
     if let Some(uri) = cfg.static_table_uri(short_name) {
         return Ok(ResolvedTableAccess {
             uri,
+            table_id: None,
             storage_options: cfg.storage_options.clone(),
         });
     }
 
-    resolve_table_access_via_uc(cfg, short_name).await
-}
-
-#[derive(Debug, Deserialize)]
-struct UcTableInfo {
-    #[serde(default)]
-    table_id: Option<String>,
-    #[serde(default)]
-    storage_location: Option<String>,
-    #[serde(default)]
-    location: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UcTempCredsResponse {
-    #[serde(default)]
-    aws_temp_credentials: Option<UcAwsTempCreds>,
-    #[serde(default)]
-    credentials: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UcAwsTempCreds {
-    #[serde(default)]
-    access_key_id: Option<String>,
-    #[serde(default)]
-    secret_access_key: Option<String>,
-    #[serde(default)]
-    session_token: Option<String>,
-}
-
-#[derive(Debug, serde::Serialize)]
-struct UcTempCredsRequest<'a> {
-    table_id: Option<&'a str>,
-    table_name: &'a str,
-    operation: &'a str,
-}
-
-fn uc_rest_client() -> reqwest::Client {
-    // Build-per-call keeps this helper side-effect free and avoids
-    // introducing another shared mutable handle into bootstrap code.
-    reqwest::Client::new()
-}
-
-fn uc_apply_auth(cfg: &UcBootstrapConfig, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    match cfg.uc_bearer_token.as_ref() {
-        Some(token) if !token.is_empty() => req.bearer_auth(token),
-        _ => req,
-    }
-}
-
-async fn resolve_table_access_via_uc(
-    cfg: &UcBootstrapConfig,
-    short_name: &str,
-) -> Result<ResolvedTableAccess, UcError> {
     let full_name = cfg.governance_table_name(short_name);
-    let base = cfg.uc_endpoint.trim_end_matches('/');
-    let client = uc_rest_client();
-
-    // 1) Fetch table metadata to get the canonical storage location
-    // and table_id (if available).
-    let table_url = format!("{base}/api/2.1/unity-catalog/tables/{full_name}");
-    let table_req = uc_apply_auth(cfg, client.get(&table_url));
-    let table_resp = table_req
-        .send()
+    let client = UcRestClient::new(cfg.uc_endpoint.clone(), cfg.auth.clone());
+    client
+        .resolve_table_access(&full_name, operation, &cfg.storage_options)
         .await
-        .map_err(|e| UcError::Config(format!("uc table lookup {full_name}: {e}")))?;
-    if !table_resp.status().is_success() {
-        let code = table_resp.status();
-        let body = table_resp.text().await.unwrap_or_default();
-        return Err(UcError::Config(format!(
-            "uc table lookup {full_name} failed ({code}): {body}"
-        )));
-    }
-    let table_info: UcTableInfo = table_resp
-        .json()
-        .await
-        .map_err(|e| UcError::Config(format!("uc table lookup decode {full_name}: {e}")))?;
-    let uri = table_info
-        .storage_location
-        .or(table_info.location)
-        .ok_or_else(|| {
-            UcError::Config(format!(
-                "uc table lookup {full_name}: missing storage_location/location"
-            ))
-        })?;
-
-    // 2) Try to vend temporary credentials. If UC returns 404/405, keep
-    // running with static options only — this supports older UC OSS
-    // builds and the local compose path where direct storage options are
-    // sufficient.
-    let creds_url = format!("{base}/api/2.1/unity-catalog/temporary-table-credentials");
-    let creds_req = UcTempCredsRequest {
-        table_id: table_info.table_id.as_deref(),
-        table_name: &full_name,
-        operation: "READ",
-    };
-    let creds_req = uc_apply_auth(cfg, client.post(&creds_url).json(&creds_req));
-    let creds_resp = creds_req
-        .send()
-        .await
-        .map_err(|e| UcError::Config(format!("uc temporary creds request {full_name}: {e}")))?;
-
-    let mut storage_options = cfg.storage_options.clone();
-    match creds_resp.status() {
-        s if s.is_success() => {
-            let payload: UcTempCredsResponse = creds_resp.json().await.map_err(|e| {
-                UcError::Config(format!("uc temporary creds decode {full_name}: {e}"))
-            })?;
-            inject_vended_storage_options(&mut storage_options, payload);
-        }
-        StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED => {
-            // Fallback mode: no vended creds endpoint available.
-        }
-        other => {
-            let body = creds_resp.text().await.unwrap_or_default();
-            return Err(UcError::Config(format!(
-                "uc temporary creds {full_name} failed ({other}): {body}"
-            )));
-        }
-    }
-
-    Ok(ResolvedTableAccess {
-        uri,
-        storage_options,
-    })
-}
-
-fn inject_vended_storage_options(out: &mut HashMap<String, String>, payload: UcTempCredsResponse) {
-    if let Some(aws) = payload.aws_temp_credentials {
-        if let Some(v) = aws.access_key_id {
-            out.insert("AWS_ACCESS_KEY_ID".into(), v);
-        }
-        if let Some(v) = aws.secret_access_key {
-            out.insert("AWS_SECRET_ACCESS_KEY".into(), v);
-        }
-        if let Some(v) = aws.session_token {
-            out.insert("AWS_SESSION_TOKEN".into(), v);
-        }
-    }
-    if let Some(kv) = payload.credentials {
-        for (k, v) in kv {
-            out.insert(k, v);
-        }
-    }
 }
 
 /// Background loop: sleeps for `interval`, refreshes the snapshot,
@@ -554,7 +471,7 @@ async fn refresh_loop(
 }
 
 /// Open a Delta table and pull every row into Arrow record batches.
-async fn scan_delta_table(
+pub(crate) async fn scan_delta_table(
     uri: &str,
     storage_options: &HashMap<String, String>,
 ) -> Result<Vec<RecordBatch>, UcError> {
@@ -849,6 +766,7 @@ fn arrow_to_policy_rows(batch: &RecordBatch) -> Result<Vec<PolicyRow>, UcError> 
         optional_col(batch, "applies_to_tag").and_then(|a| a.as_string_opt::<i32>().cloned());
     let description =
         optional_col(batch, "description").and_then(|a| a.as_string_opt::<i32>().cloned());
+    let owner = optional_col(batch, "owner").and_then(|a| a.as_string_opt::<i32>().cloned());
 
     let mut out = Vec::with_capacity(batch.num_rows());
     for i in 0..batch.num_rows() {
@@ -883,6 +801,13 @@ fn arrow_to_policy_rows(batch: &RecordBatch) -> Result<Vec<PolicyRow>, UcError> 
             effect: get_string(&effect, i),
             applies_to_roles: get_optional_string_list(batch, "applies_to_roles", i),
             description: description.as_ref().and_then(|a| {
+                if a.is_null(i) || a.value(i).is_empty() {
+                    None
+                } else {
+                    Some(a.value(i).to_string())
+                }
+            }),
+            owner: owner.as_ref().and_then(|a| {
                 if a.is_null(i) || a.value(i).is_empty() {
                     None
                 } else {
@@ -1224,7 +1149,7 @@ mod tests {
         assert_eq!(cfg.governance_catalog, "governance");
         assert_eq!(cfg.governance_schema, "policast");
         assert_eq!(cfg.refresh_interval, Some(Duration::from_secs(30)));
-        assert!(cfg.uc_bearer_token.is_none());
+        assert_eq!(cfg.auth, AuthMode::Disabled);
         assert!(cfg.storage_uri_template.is_none());
         assert!(cfg.storage_options.is_empty());
     }
@@ -1369,31 +1294,6 @@ mod tests {
         assert_eq!(backend.bindings().await.unwrap().len(), 2);
         assert_eq!(backend.tags().await.unwrap().len(), 2);
         server.abort();
-    }
-
-    #[test]
-    fn test_inject_vended_storage_options_populates_aws_keys() {
-        let mut out = HashMap::new();
-        out.insert("AWS_REGION".to_string(), "us-east-1".to_string());
-        inject_vended_storage_options(
-            &mut out,
-            UcTempCredsResponse {
-                aws_temp_credentials: Some(UcAwsTempCreds {
-                    access_key_id: Some("ak".into()),
-                    secret_access_key: Some("sk".into()),
-                    session_token: Some("st".into()),
-                }),
-                credentials: None,
-            },
-        );
-        assert_eq!(out.get("AWS_ACCESS_KEY_ID").map(String::as_str), Some("ak"));
-        assert_eq!(
-            out.get("AWS_SECRET_ACCESS_KEY").map(String::as_str),
-            Some("sk")
-        );
-        assert_eq!(out.get("AWS_SESSION_TOKEN").map(String::as_str), Some("st"));
-        // Existing static options are preserved.
-        assert_eq!(out.get("AWS_REGION").map(String::as_str), Some("us-east-1"));
     }
 
     /// A deployment that has not seeded `tags.json` / the `tags`

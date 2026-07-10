@@ -45,6 +45,12 @@ pub struct PolicyRow {
     pub applies_to_roles: Option<Vec<String>>,
     #[serde(default)]
     pub description: Option<String>,
+    /// Owner principal (from the `@owner` annotation, defaulting to the
+    /// author on publish). Only the owner or an admin may edit the
+    /// policy; everyone may read. `None` on legacy rows predating the
+    /// owner column.
+    #[serde(default)]
+    pub owner: Option<String>,
     pub version: i64,
 }
 

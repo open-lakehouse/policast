@@ -12,12 +12,18 @@ workspace = true
 default      = ["client"]
 client       = ["dep:reqwest"]
 sidecar      = ["dep:axum", "dep:tower", "dep:tower-http", "dep:clap"]
+# `redis` makes the materialized protobuf PolicyStore available
+# (binary `PolicyManifest` blobs under the `policast:v2:` keyspace).
+# Pulls in the `redis` async client and the `proto` conversions from
+# `policast-core` (which owns the prost encode/decode).
+redis        = ["dep:redis", "policast-core/redis", "policast-core/proto"]
 # `uc-bootstrap` enables the Unity Catalog bootstrap backend. It pulls
 # in `deltalake` + `datafusion` so the sidecar can open governance
 # Delta tables directly and snapshot them into memory. This is opt-in
 # because the dep fan-out is significant (tens of transitive crates);
-# the flat-file `FileBackend` remains the default sidecar backend.
-uc-bootstrap = ["dep:deltalake", "dep:datafusion", "dep:reqwest"]
+# the flat-file `FileBackend` remains the default sidecar backend. It
+# also enables `client` so the shared `uc_rest` REST client is built.
+uc-bootstrap = ["client", "dep:deltalake", "dep:datafusion"]
 
 [dependencies]
 policast-core = { path = "../policast-core" }
@@ -35,6 +41,11 @@ parking_lot = { workspace = true }
 
 # Client dependencies (gated by `client` feature)
 reqwest = { workspace = true, optional = true }
+
+# Materialized PolicyStore dependency (gated by `redis` feature).
+# `redis` pins must match policast-core's redis dep so the workspace
+# resolves a single version.
+redis = { version = "1.2.1", default-features = false, features = ["tokio-comp", "connection-manager"], optional = true }
 
 # Sidecar dependencies (gated by `sidecar` feature)
 axum       = { workspace = true, optional = true }

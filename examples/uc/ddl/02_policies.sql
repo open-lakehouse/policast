@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS governance.policast.policies (
     effect             STRING       NOT NULL  COMMENT 'permit | forbid',
     applies_to_roles   ARRAY<STRING>          COMMENT 'from @roles(...) annotation',
     description        STRING,
+    owner              STRING                 COMMENT 'from @owner(...) annotation; defaults to created_by. Only the owner (or an admin) may edit the policy; everyone may read.',
     version            BIGINT       NOT NULL,
     created_by         STRING       NOT NULL,
     created_at         TIMESTAMP    NOT NULL,

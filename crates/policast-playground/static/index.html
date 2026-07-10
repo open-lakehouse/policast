@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>policast · policy playground</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --border: #2a2f3a;
+    --text: #e6e9ef;
+    --muted: #9aa3b2;
+    --accent: #6ea8fe;
+    --accent-2: #3b82f6;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --mask: #f59e0b;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .tag { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  header .endpoint { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  main { display: grid; grid-template-columns: minmax(360px, 460px) 1fr; gap: 0; height: calc(100vh - 53px); }
+  .col { overflow-y: auto; padding: 18px 20px; }
+  .col.left { border-right: 1px solid var(--border); }
+  .field { margin-bottom: 16px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
+  input[type=text], input[type=number], textarea {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+    font-size: 13px; font-family: var(--mono); outline: none;
+  }
+  input:focus, textarea:focus { border-color: var(--accent-2); }
+  textarea { resize: vertical; }
+  .row { display: flex; gap: 12px; }
+  .row > * { flex: 1; }
+  button.run {
+    background: var(--accent-2); color: white; border: none; border-radius: 8px;
+    padding: 11px 18px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%;
+  }
+  button.run:hover { background: var(--accent); }
+  button.run:disabled { opacity: .6; cursor: progress; }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 5px; }
+  .section-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; }
+  .placeholder { color: var(--muted); padding: 40px 0; text-align: center; }
+  .error {
+    background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.4);
+    color: var(--err); padding: 12px 14px; border-radius: 8px; font-family: var(--mono);
+    font-size: 13px; white-space: pre-wrap; margin-bottom: 16px;
+  }
+  .meta { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .meta b { color: var(--text); font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+  .chip {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px;
+    padding: 3px 10px; font-size: 12px; font-family: var(--mono);
+  }
+  .chip.mask { border-color: rgba(245,158,11,.5); color: var(--mask); }
+  .policy {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 8px; font-size: 12px;
+  }
+  .policy .pid { font-weight: 600; }
+  .policy .ft { color: var(--accent); font-family: var(--mono); margin-left: 8px; }
+  .policy .cel { color: var(--muted); font-family: var(--mono); margin-top: 4px; white-space: pre-wrap; }
+  table.results { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12.5px; }
+  table.results th, table.results td {
+    border: 1px solid var(--border); padding: 6px 10px; text-align: left; white-space: nowrap;
+  }
+  table.results th { background: var(--panel); position: sticky; top: 0; }
+  table.results td.null { color: var(--muted); font-style: italic; }
+  table.results td.masked { color: var(--mask); }
+  .scroll-x { overflow-x: auto; border-radius: 8px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>policast</h1>
+    <span class="tag">policy playground</span>
+    <span class="spacer"></span>
+    <span class="endpoint" id="endpoint"></span>
+  </header>
+  <main>
+    <div class="col left">
+      <div class="field">
+        <label for="table">Unity Catalog table</label>
+        <input type="text" id="table" value="hospital.clinical.patients" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>Principal</label>
+        <div class="row">
+          <input type="text" id="pid" placeholder="id (e.g. alice@hospital.com)" value="alice@hospital.com" spellcheck="false" />
+          <input type="text" id="prole" placeholder="role" value="analyst" spellcheck="false" />
+        </div>
+        <textarea id="pattrs" rows="2" spellcheck="false" placeholder="extra attrs, key=value per line&#10;region=us-east">region=us-east</textarea>
+        <div class="hint">key=value per line → <code>principal.&lt;key&gt;</code> in CEL (role is set above).</div>
+      </div>
+      <div class="field">
+        <label for="policies">Cedar policies</label>
+        <textarea id="policies" rows="9" spellcheck="false">@id("row_filter_region")
+@filter_type("row_filter")
+@target_table("hospital.clinical.patients")
+permit (principal, action == Action::"query", resource)
+when { resource.region == principal.region };
+
+@id("mask_ssn")
+@filter_type("column_mask")
+@target_table("hospital.clinical.patients")
+@column("ssn")
+forbid (principal, action, resource)
+unless { principal.role == "admin" };</textarea>
+        <div class="hint">Compiled to CEL on every run. Leave empty for an ungoverned baseline.</div>
+      </div>
+      <div class="field">
+        <label for="functions">Inline UC SQL functions (JSON, optional)</label>
+        <textarea id="functions" rows="3" spellcheck="false" placeholder='[{"name":"mask_email","params":[{"name":"e","type_text":"STRING"}],"data_type":"STRING","routine_definition":"concat(substr(e,1,1),''***'')"}]'></textarea>
+      </div>
+      <div class="field">
+        <label for="sql">SQL</label>
+        <textarea id="sql" rows="3" spellcheck="false">SELECT * FROM patients LIMIT 50</textarea>
+        <div class="hint">Reference the table by its leaf name (e.g. <code>patients</code>).</div>
+      </div>
+      <div class="field row">
+        <div>
+          <label for="limit">Row limit</label>
+          <input type="number" id="limit" value="100" min="1" max="1000" />
+        </div>
+        <div style="display:flex; align-items:flex-end;">
+          <button class="run" id="run">Run governed query</button>
+        </div>
+      </div>
+    </div>
+    <div class="col right" id="results">
+      <div class="placeholder">Run a query to see the governed result.</div>
+    </div>
+  </main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function parseAttrs(text) {
+  const attrs = {};
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    const i = t.indexOf("=");
+    if (i > 0) attrs[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+  }
+  return attrs;
+}
+
+function el(tag, opts = {}, ...children) {
+  const e = document.createElement(tag);
+  if (opts.class) e.className = opts.class;
+  if (opts.text != null) e.textContent = opts.text;
+  for (const c of children) e.appendChild(c);
+  return e;
+}
+
+function renderError(msg) {
+  const r = $("results");
+  r.innerHTML = "";
+  r.appendChild(el("div", { class: "error", text: msg }));
+}
+
+function renderResult(res) {
+  const r = $("results");
+  r.innerHTML = "";
+
+  const meta = el("div", { class: "meta" });
+  meta.innerHTML = `<span><b>${res.total_rows}</b> rows${res.truncated ? ` (showing ${res.rows.length})` : ""}</span>` +
+    `<span><b>${res.applied_policies.length}</b> policies on table</span>` +
+    `<span><b>${res.applied_masks.length}</b> masked column(s)</span>` +
+    `<span><b>${res.elapsed_ms}</b> ms</span>`;
+  r.appendChild(meta);
+
+  if (res.applied_masks.length) {
+    const chips = el("div", { class: "chips" });
+    for (const m of res.applied_masks) {
+      chips.appendChild(el("span", { class: "chip mask", text: `${m.column} → ${m.mask}` }));
+    }
+    r.appendChild(chips);
+  }
+
+  if (res.applied_policies.length) {
+    r.appendChild(el("div", { class: "section-title", text: "Policies targeting this table" }));
+    for (const p of res.applied_policies) {
+      const pol = el("div", { class: "policy" });
+      const head = el("div");
+      head.appendChild(el("span", { class: "pid", text: p.id }));
+      head.appendChild(el("span", { class: "ft", text: p.filter_type }));
+      pol.appendChild(head);
+      pol.appendChild(el("div", { class: "cel", text: p.cel_expression }));
+      r.appendChild(pol);
+    }
+  }
+
+  r.appendChild(el("div", { class: "section-title", text: "Result" }));
+  const wrap = el("div", { class: "scroll-x" });
+  const table = el("table", { class: "results" });
+  const thead = el("thead");
+  const htr = el("tr");
+  for (const c of res.columns) htr.appendChild(el("th", { text: c }));
+  thead.appendChild(htr);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  const maskedCols = new Set(res.applied_masks.map((m) => m.column));
+  for (const row of res.rows) {
+    const tr = el("tr");
+    row.forEach((cell, i) => {
+      const td = el("td");
+      if (cell === null) { td.textContent = "NULL"; td.className = "null"; }
+      else {
+        td.textContent = cell;
+        if (maskedCols.has(res.columns[i])) td.className = "masked";
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  r.appendChild(wrap);
+}
+
+async function run() {
+  const btn = $("run");
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  try {
+    let functions = [];
+    const fnText = $("functions").value.trim();
+    if (fnText) {
+      try { functions = JSON.parse(fnText); }
+      catch (e) { renderError("Functions JSON is invalid: " + e.message); return; }
+    }
+    const policiesText = $("policies").value.trim();
+    const body = {
+      table: $("table").value.trim(),
+      principal: {
+        id: $("pid").value.trim(),
+        role: $("prole").value.trim(),
+        attrs: parseAttrs($("pattrs").value),
+      },
+      policies: policiesText ? [policiesText] : [],
+      functions,
+      sql: $("sql").value,
+      limit: parseInt($("limit").value, 10) || 100,
+    };
+    const resp = await fetch("/api/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { renderError(data.error || ("HTTP " + resp.status)); return; }
+    renderResult(data);
+  } catch (e) {
+    renderError(String(e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Run governed query";
+  }
+}
+
+$("run").addEventListener("click", run);
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") run();
+});
+</script>
+</body>
+</html>

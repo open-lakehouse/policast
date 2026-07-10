@@ -1,0 +1,38 @@
+[package]
+name = "policast-playground"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Policy playground: test compiled Cedar/CEL governance + UC SQL functions against a Unity Catalog table in DataFusion"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "policast-playground"
+path = "src/main.rs"
+
+[dependencies]
+policast-core = { path = "../policast-core" }
+# default features = client (UcRestClient, exchange, types::Principal, AuthMode).
+policast-uc = { path = "../policast-uc" }
+# default features expose GovernedTable + AttrIdentity (no UC/Delta feature needed;
+# the playground opens Delta itself and wraps the provider).
+policast-datafusion = { path = "../policast-datafusion" }
+
+datafusion = { workspace = true }
+# `s3` so the playground can read S3-backed (hosted) Unity Catalog tables;
+# `datafusion` comes from the workspace default. Local file:// tables (tests)
+# work either way.
+deltalake = { workspace = true, features = ["s3"] }
+
+axum = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+tempfile = { workspace = true }

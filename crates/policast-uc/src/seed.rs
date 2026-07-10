@@ -225,6 +225,7 @@ fn policies_schema() -> Arc<Schema> {
             true,
         ),
         Field::new("description", DataType::Utf8, true),
+        Field::new("owner", DataType::Utf8, true),
         Field::new("version", DataType::Int64, false),
     ]))
 }
@@ -280,6 +281,7 @@ fn policies_to_batch(rows: &[PolicyRow]) -> Result<RecordBatch, UcError> {
     let mut effect = StringBuilder::new();
     let mut applies_to_roles = ListBuilder::new(StringBuilder::new());
     let mut description = StringBuilder::new();
+    let mut owner = StringBuilder::new();
     let mut version = Int64Builder::new();
 
     for r in rows {
@@ -300,6 +302,7 @@ fn policies_to_batch(rows: &[PolicyRow]) -> Result<RecordBatch, UcError> {
             None => applies_to_roles.append(false),
         }
         append_opt(&mut description, r.description.as_deref());
+        append_opt(&mut owner, r.owner.as_deref());
         version.append_value(r.version);
     }
 
@@ -313,6 +316,7 @@ fn policies_to_batch(rows: &[PolicyRow]) -> Result<RecordBatch, UcError> {
         Arc::new(effect.finish()),
         Arc::new(applies_to_roles.finish()),
         Arc::new(description.finish()),
+        Arc::new(owner.finish()),
         Arc::new(version.finish()),
     ];
     RecordBatch::try_new(policies_schema(), columns)

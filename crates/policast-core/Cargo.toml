@@ -21,6 +21,7 @@ clap = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 redis = { version = "1.2.1", default-features = false, features = ["tokio-comp", "connection-manager"], optional = true }
+prost = { version = "0.14", optional = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
@@ -29,3 +30,7 @@ tempfile = { workspace = true }
 
 [features]
 redis = ["dep:redis"]
+# `proto` exposes prost-generated mirrors of the manifest types plus
+# serde<->proto conversions. Used to store compiled manifests as binary
+# protobuf (e.g. in Redis). JSON stays the canonical/signed wire format.
+proto = ["dep:prost"]

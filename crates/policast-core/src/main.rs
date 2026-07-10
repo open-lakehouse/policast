@@ -156,6 +156,11 @@ struct PolicyRow {
     applies_to_roles: Option<Vec<String>>,
     #[serde(default)]
     description: Option<String>,
+    /// Owner principal (from `@owner`); populated by the owner-aware
+    /// edit path in `policast-uc`. The offline CLI publish leaves it
+    /// `None`.
+    #[serde(default)]
+    owner: Option<String>,
     version: i64,
 }
 
@@ -525,6 +530,7 @@ fn compiled_to_row(p: &CompiledPolicy, version: i64) -> PolicyRow {
         .to_string(),
         applies_to_roles: p.applies_to.as_ref().map(|a| a.roles.clone()),
         description: p.description.clone(),
+        owner: None,
         version,
     }
 }

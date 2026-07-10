@@ -94,9 +94,209 @@ impl IntoResponse for SidecarError {
             UcError::Invalid(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             UcError::BadSignature => (StatusCode::UNAUTHORIZED, "bad signature".into()),
             UcError::Expired(ts) => (StatusCode::GONE, format!("expired at {ts}")),
+            UcError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
+            UcError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             other => (StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
         };
         (status, body).into_response()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Owner-aware policy edit API (feature = "uc-bootstrap").
+//
+// Three routes layered on top of the resolve sidecar:
+//   GET  /policies/:id           -> current version (cedar, version, owner, cel)
+//   POST /policies/:id/validate  -> compile-only dry run
+//   PUT  /policies/:id           -> owner/admin-checked edit + version append
+//
+// On a successful edit, if a reflush target is configured, the
+// governance snapshot is refreshed and re-materialized into Redis so
+// the change propagates to the serving store.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "uc-bootstrap")]
+pub use editor_api::{editor_router, EditorState};
+
+#[cfg(all(feature = "uc-bootstrap", feature = "redis"))]
+pub use editor_api::Reflush;
+
+#[cfg(feature = "uc-bootstrap")]
+mod editor_api {
+    use std::sync::Arc;
+
+    use axum::{
+        extract::{Path, State},
+        response::Json as JsonResponse,
+        routing::{get, post},
+        Json, Router,
+    };
+    use serde::{Deserialize, Serialize};
+
+    use super::SidecarError;
+    use crate::editor::PolicyEditor;
+    use crate::types::Principal;
+
+    /// Shared state for the editor routes.
+    #[derive(Clone)]
+    pub struct EditorState {
+        pub editor: Arc<PolicyEditor>,
+        /// Optional reflush target: after a successful edit, refresh the
+        /// governance snapshot and re-materialize it into Redis.
+        #[cfg(feature = "redis")]
+        pub reflush: Option<Reflush>,
+    }
+
+    /// Backend + materialized store used to reflush after an edit.
+    #[cfg(feature = "redis")]
+    #[derive(Clone)]
+    pub struct Reflush {
+        pub backend: crate::uc_bootstrap::UcBootstrapBackend,
+        pub store: crate::redis_store::RedisManifestStore,
+    }
+
+    impl EditorState {
+        pub fn new(editor: Arc<PolicyEditor>) -> Self {
+            Self {
+                editor,
+                #[cfg(feature = "redis")]
+                reflush: None,
+            }
+        }
+
+        /// Wire a reflush target so edits propagate into Redis.
+        #[cfg(feature = "redis")]
+        pub fn with_reflush(mut self, reflush: Reflush) -> Self {
+            self.reflush = Some(reflush);
+            self
+        }
+    }
+
+    /// Build the editor `Router` with `state` already applied, ready to
+    /// merge into the resolve sidecar router.
+    pub fn editor_router(state: EditorState) -> Router {
+        Router::new()
+            .route("/policies/:id", get(get_policy).put(put_policy))
+            .route("/policies/:id/validate", post(validate_policy))
+            .with_state(state)
+    }
+
+    #[derive(Serialize)]
+    struct CurrentPolicyResponse {
+        policy_id: String,
+        version: i64,
+        owner: Option<String>,
+        created_by: String,
+        cedar_source: String,
+        cel_expression: Option<String>,
+    }
+
+    async fn get_policy(
+        State(state): State<EditorState>,
+        Path(id): Path<String>,
+    ) -> Result<JsonResponse<CurrentPolicyResponse>, SidecarError> {
+        let current = state
+            .editor
+            .get_current(&id)
+            .await
+            .map_err(SidecarError::from)?
+            .ok_or_else(|| {
+                SidecarError::from(crate::error::UcError::NotFound(format!("policy `{id}`")))
+            })?;
+        Ok(JsonResponse(CurrentPolicyResponse {
+            policy_id: current.policy_id,
+            version: current.version,
+            owner: current.owner,
+            created_by: current.created_by,
+            cedar_source: current.cedar_source,
+            cel_expression: current.cel_expression,
+        }))
+    }
+
+    #[derive(Deserialize)]
+    struct ValidateRequest {
+        cedar: String,
+    }
+
+    #[derive(Serialize)]
+    struct ValidateResponse {
+        policy_id: String,
+        owner: Option<String>,
+        cel_expression: String,
+    }
+
+    async fn validate_policy(
+        State(state): State<EditorState>,
+        Path(_id): Path<String>,
+        Json(req): Json<ValidateRequest>,
+    ) -> Result<JsonResponse<ValidateResponse>, SidecarError> {
+        let doc = state
+            .editor
+            .validate(&req.cedar)
+            .map_err(SidecarError::from)?;
+        Ok(JsonResponse(ValidateResponse {
+            policy_id: doc.policy.id,
+            owner: doc.owner,
+            cel_expression: doc.policy.cel_expression,
+        }))
+    }
+
+    #[derive(Deserialize)]
+    struct EditRequest {
+        cedar: String,
+        principal: Principal,
+    }
+
+    #[derive(Serialize)]
+    struct EditResponse {
+        policy_id: String,
+        new_version: i64,
+        owner: String,
+        reflushed_tables: Option<Vec<String>>,
+    }
+
+    async fn put_policy(
+        State(state): State<EditorState>,
+        Path(id): Path<String>,
+        Json(req): Json<EditRequest>,
+    ) -> Result<JsonResponse<EditResponse>, SidecarError> {
+        let outcome = state
+            .editor
+            .edit(&id, &req.cedar, &req.principal)
+            .await
+            .map_err(SidecarError::from)?;
+
+        let reflushed = reflush_after_edit(&state).await?;
+
+        Ok(JsonResponse(EditResponse {
+            policy_id: outcome.policy_id,
+            new_version: outcome.new_version,
+            owner: outcome.owner,
+            reflushed_tables: reflushed,
+        }))
+    }
+
+    #[cfg(feature = "redis")]
+    async fn reflush_after_edit(state: &EditorState) -> Result<Option<Vec<String>>, SidecarError> {
+        let Some(reflush) = state.reflush.as_ref() else {
+            return Ok(None);
+        };
+        reflush
+            .backend
+            .refresh_snapshot()
+            .await
+            .map_err(SidecarError::from)?;
+        let tables = reflush
+            .backend
+            .materialize_into(&reflush.store)
+            .await
+            .map_err(SidecarError::from)?;
+        Ok(Some(tables))
+    }
+
+    #[cfg(not(feature = "redis"))]
+    async fn reflush_after_edit(_state: &EditorState) -> Result<Option<Vec<String>>, SidecarError> {
+        Ok(None)
     }
 }
 
@@ -396,6 +596,120 @@ mod tests {
             "expected row_filter_region in bindings_applied, got {:?}",
             bundle.bindings_applied
         );
+        handle.abort();
+    }
+
+    /// Drives the editor routes (GET / validate / PUT) end-to-end
+    /// against a tempdir of full-schema governance Delta tables.
+    #[cfg(feature = "uc-bootstrap")]
+    #[tokio::test]
+    async fn test_editor_router_roundtrip() {
+        use crate::editor::{seed_editable_tables, PolicyEditor, DEFAULT_ADMIN_ROLE};
+        use crate::uc_bootstrap::UcBootstrapConfig;
+        use serde_json::{json, Value};
+        use std::sync::Arc;
+
+        const V1: &str = r#"
+            @id("rf")
+            @filter_type("row_filter")
+            @target_table("hospital.clinical.patients")
+            @owner("alice@hospital.com")
+            @roles("analyst")
+            permit (principal, action == Action::"query", resource)
+            when { resource.region == principal.region };
+        "#;
+
+        let dir = tempfile::tempdir().unwrap();
+        let template = format!("{}/{{table}}", dir.path().to_str().unwrap());
+        seed_editable_tables(
+            &template,
+            "rf",
+            V1,
+            Some("alice@hospital.com"),
+            "alice@hospital.com",
+        )
+        .await
+        .unwrap();
+
+        let cfg =
+            UcBootstrapConfig::for_example_stack("http://uc").with_storage_uri_template(&template);
+        let editor = Arc::new(PolicyEditor::new(cfg, DEFAULT_ADMIN_ROLE));
+        let router = editor_router(EditorState::new(editor));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let client = reqwest::Client::new();
+
+        // GET current version.
+        let resp = client
+            .get(format!("http://{addr}/policies/rf"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let body: Value = resp.json().await.unwrap();
+        assert_eq!(body["version"], 1);
+        assert_eq!(body["owner"], "alice@hospital.com");
+
+        // Validate a proposed edit (compile-only).
+        let v2 = V1.replace(
+            "when { resource.region == principal.region };",
+            "when { resource.region == principal.region }\nunless { principal.role == \"auditor\" };",
+        );
+        let resp = client
+            .post(format!("http://{addr}/policies/rf/validate"))
+            .json(&json!({ "cedar": v2 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+
+        // PUT edit as a non-owner -> 403.
+        let resp = client
+            .put(format!("http://{addr}/policies/rf"))
+            .json(&json!({
+                "cedar": v2,
+                "principal": { "id": "mallory@evil.com", "role": "analyst" }
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403);
+
+        // PUT edit as the owner -> 200, version bumps to 2.
+        let resp = client
+            .put(format!("http://{addr}/policies/rf"))
+            .json(&json!({
+                "cedar": v2,
+                "principal": { "id": "alice@hospital.com", "role": "analyst" }
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let body: Value = resp.json().await.unwrap();
+        assert_eq!(body["new_version"], 2);
+
+        // GET now returns version 2.
+        let resp = client
+            .get(format!("http://{addr}/policies/rf"))
+            .send()
+            .await
+            .unwrap();
+        let body: Value = resp.json().await.unwrap();
+        assert_eq!(body["version"], 2);
+
+        // Unknown policy -> 404.
+        let resp = client
+            .get(format!("http://{addr}/policies/ghost"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 404);
+
         handle.abort();
     }
 }

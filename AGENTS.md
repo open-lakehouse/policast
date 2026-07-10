@@ -44,8 +44,10 @@ Cedar Policy (.cedar)
 
 | Path | Language | Purpose |
 |------|----------|---------|
-| `crates/policast-core/` | Rust | Cedar parser, CEL emitter, CLI binary (`policast`), policy manifest |
+| `crates/policast-core/` | Rust | Cedar parser, CEL emitter, CLI binary (`policast`), policy manifest, optional `proto`/`redis` features |
 | `crates/policast-datafusion/` | Rust | DataFusion `GovernedTable` wrapper, CEL→DataFusion `Expr` compiler, row filters, column masks, optional Delta Lake via `delta` feature |
+| `crates/policast-uc/` | Rust | Unity Catalog REST client, resolver sidecar + owner-aware policy edit API, materialized protobuf PolicyStore (Redis) |
+| `crates/policast-playground/` | Rust | Governed-query playground: serves a SPA + `POST /api/query` that runs Cedar/CEL policies and UC SQL-function UDFs against a UC table via `GovernedTable` |
 | `policast-spark/` | Scala | Spark 4.1 plugin, Catalyst optimizer rules, CEL evaluator (cel-java), not a Cargo workspace member |
 | `examples/` | Mixed | Cedar policies, sample data (`patients.csv`), DataFusion and Spark demo runners |
 | `scripts/` | Shell | `compile-policies.sh` convenience script |
@@ -58,12 +60,16 @@ Use these focused guides when working inside a specific module:
 
 - [`crates/policast-core/AGENTS.md`](crates/policast-core/AGENTS.md)
 - [`crates/policast-datafusion/AGENTS.md`](crates/policast-datafusion/AGENTS.md)
+- [`crates/policast-uc/AGENTS.md`](crates/policast-uc/AGENTS.md)
+- [`crates/policast-playground/AGENTS.md`](crates/policast-playground/AGENTS.md)
 - [`policast-spark/AGENTS.md`](policast-spark/AGENTS.md)
 
 ### Key dependencies
 
-- **policast-core**: `cedar-policy` (4.x), `serde`, `serde_json`, `clap`, `thiserror`
+- **policast-core**: `cedar-policy` (4.x), `serde`, `serde_json`, `clap`, `thiserror`; optional `redis` (`redis` feature) and `prost` (`proto` feature — checked-in `policast.v1` codegen)
 - **policast-datafusion**: `datafusion` (46), `cel-interpreter`, `cel-parser`, optional `deltalake` (0.25)
+- **policast-uc**: `reqwest` (`client`/UC REST), `axum`/`tower` (`sidecar`), optional `redis` (`redis` feature — materialized protobuf PolicyStore) and `deltalake`/`datafusion` (`uc-bootstrap` — Delta snapshot + owner-aware editor)
+- **policast-playground**: `axum`, `datafusion`, `deltalake` (with `s3`), `policast-datafusion` (`GovernedTable`), `policast-uc` (UC REST + compile)
 - **policast-spark**: Spark 4.1, `cel-java` 0.12, Gson
 
 ## Governance model

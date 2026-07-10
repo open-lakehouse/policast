@@ -40,4 +40,14 @@ pub enum UcError {
     /// Malformed input to signature/cache/etc.
     #[error("invalid argument: {0}")]
     Invalid(String),
+
+    /// The requesting principal is not allowed to perform the edit
+    /// (not the owner and not an admin). Maps to HTTP 403.
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+
+    /// The referenced policy (or version) does not exist. Maps to
+    /// HTTP 404.
+    #[error("not found: {0}")]
+    NotFound(String),
 }

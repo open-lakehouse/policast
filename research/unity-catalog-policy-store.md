@@ -371,6 +371,37 @@ from `spark.policast.uc.endpoint` instead of
 3. How to expose binding edits to non-SQL users (UI vs `policast uc
    bind`)? **Current stance:** CLI-first, UI deferred.
 
+## 10b. Phase one status (policast-uc rethink)
+
+The `policast-uc` rethink implemented the next slice of this design:
+
+- **Authenticated UC REST client** (`uc_rest::UcRestClient`) with an
+  `auth=true|false` toggle (`AuthMode`): static bearer token against the hosted
+  UC (`https://uc.openlakehousedemos.dev`), no header for local docker. Reads
+  governance tables via `GET /tables/{full_name}` + `POST
+  /temporary-table-credentials`.
+- **Redis is the materialized serving store.** UC's `governance.policast.*`
+  Delta tables stay the source of truth; a `materialize` step compiles them into
+  one `PolicyManifest` per table, stored as **binary protobuf** under
+  `policast:v2:manifest:` (`redis_store::RedisManifestStore`). The resolver reads
+  Redis first with an in-memory fallback (`RedisFirstPolicyStore`). A refresh
+  loop (`run_materialize_loop`) flushes UC updates into Redis.
+- **Owner-aware editing.** Policies carry an `owner` column (from the Cedar
+  `@owner` annotation, defaulting to `created_by`). `editor::PolicyEditor` serves
+  get/validate/edit: everyone reads, only the owner or the `governance_admin`
+  role edits. An edit compiles the new Cedar and **appends** a new version row to
+  `policies` + `manifest` via delta-rs (`READ_WRITE` vended creds); the resolver
+  treats the highest `version` per `policy_id` as authoritative. Exposed over the
+  sidecar as `GET` / `POST …/validate` / `PUT /policies/:id`, with a Redis reflush
+  after a successful edit.
+
+Open question 3 above ("UI for edits") is answered: a CLI/REST edit path now
+exists, and **phase two** adds the `policast-playground` crate — a governed-query
+playground (SPA + `POST /api/query`) that compiles inline Cedar policies and
+registers Unity Catalog SQL functions as DataFusion UDFs, then runs SQL through
+`GovernedTable` so you can see the row filters / column masks a principal would
+experience against a real UC table.
+
 ## 11. Deliverables (cross-reference to plan)
 
 See the 10-stage implementation plan in

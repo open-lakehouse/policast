@@ -6,6 +6,8 @@ pub mod model;
 pub mod policy_manifest;
 pub mod policy_store;
 pub mod profile;
+#[cfg(feature = "proto")]
+pub mod proto;
 pub mod scaffold;
 
 pub use cedar_parser::parse_policies;
@@ -20,4 +22,6 @@ pub use policy_store::{
     ResolvedCache, ResolvedPolicies,
 };
 pub use profile::{PolicyProfile, CANONICAL_PRINCIPAL_ATTRS};
+#[cfg(feature = "proto")]
+pub use proto::ProtoError;
 pub use scaffold::{parse_profile_kind, render_scaffold, ScaffoldOptions};
