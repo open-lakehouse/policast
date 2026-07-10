@@ -62,11 +62,14 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/policast-core/Cargo.toml crates/policast-core/Cargo.toml
 COPY crates/policast-datafusion/Cargo.toml crates/policast-datafusion/Cargo.toml
 COPY crates/policast-uc/Cargo.toml crates/policast-uc/Cargo.toml
+COPY crates/policast-playground/Cargo.toml crates/policast-playground/Cargo.toml
 
 COPY crates/policast-core/src crates/policast-core/src
 COPY crates/policast-datafusion/src crates/policast-datafusion/src
 COPY crates/policast-datafusion/tests crates/policast-datafusion/tests
 COPY crates/policast-uc/src crates/policast-uc/src
+COPY crates/policast-playground/src crates/policast-playground/src
+COPY crates/policast-playground/static crates/policast-playground/static
 COPY examples examples
 COPY scripts scripts
 
@@ -141,6 +144,38 @@ ENV POLICAST_UC_ENDPOINT=http://sidecar:8765 \
     POLICAST_TABLE=hospital.clinical.patients
 
 ENTRYPOINT ["/usr/local/bin/entrypoint-demo.sh"]
+
+##########################
+# 5b. Playground build stage
+##########################
+FROM builder AS playground-build
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/workspace/target \
+    cargo build --release \
+        -p policast-playground \
+        --bin policast-playground \
+    && cp target/release/policast-playground /usr/local/bin/policast-playground
+
+########################
+# 5c. Playground runtime
+########################
+FROM debian:bookworm-slim AS playground
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      libssl3 \
+      curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=playground-build /usr/local/bin/policast-playground /usr/local/bin/policast-playground
+
+# Runs as root so `--demo-table` can write the demo Delta table into the
+# mounted data volume. Local dev only.
+EXPOSE 8088
+
+ENTRYPOINT ["/usr/local/bin/policast-playground"]
+CMD ["--listen", "0.0.0.0:8088"]
 
 #################################
 # 6. Interactive dev shell image

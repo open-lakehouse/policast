@@ -16,6 +16,21 @@ pub struct ParsedPolicy {
     pub annotations: HashMap<String, String>,
 }
 
+impl ParsedPolicy {
+    /// The `@owner(...)` annotation, if present and non-empty.
+    ///
+    /// This identifies the principal allowed to edit the policy (the
+    /// owner; everyone may read). The owner-aware edit path in
+    /// `policast-uc` defaults this to the author (`created_by`) when the
+    /// annotation is absent.
+    pub fn owner(&self) -> Option<&str> {
+        self.annotations
+            .get("owner")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ParsedCondition {
     pub kind: ConditionKind,
@@ -155,6 +170,36 @@ mod tests {
         assert_eq!(policies[0].id, "deny_test");
         assert_eq!(policies[0].effect, "forbid");
         assert_eq!(policies[0].conditions.len(), 2);
+    }
+
+    #[test]
+    fn test_owner_annotation_parsed() {
+        let cedar = r#"
+            @id("owned")
+            @owner("alice@hospital.com")
+            permit (principal, action == Action::"query", resource)
+            when { resource.region == "us-east" };
+        "#;
+        let policies = parse_policies(cedar).expect("should parse");
+        assert_eq!(policies[0].owner(), Some("alice@hospital.com"));
+    }
+
+    #[test]
+    fn test_owner_absent_or_empty_is_none() {
+        let no_owner = r#"
+            @id("unowned")
+            permit (principal, action == Action::"query", resource)
+            when { resource.region == "us-east" };
+        "#;
+        assert_eq!(parse_policies(no_owner).unwrap()[0].owner(), None);
+
+        let empty_owner = r#"
+            @id("blank")
+            @owner("")
+            permit (principal, action == Action::"query", resource)
+            when { resource.region == "us-east" };
+        "#;
+        assert_eq!(parse_policies(empty_owner).unwrap()[0].owner(), None);
     }
 
     #[test]

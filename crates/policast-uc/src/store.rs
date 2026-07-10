@@ -105,12 +105,8 @@ impl ResolverCore {
         let mut seen = std::collections::HashSet::new();
         applied_ids.retain(|(_, id)| seen.insert(id.clone()));
 
-        let policies_by_id: BTreeMap<&str, &PolicyRow> =
-            policies.iter().map(|p| (p.policy_id.as_str(), p)).collect();
-        let manifest_by_id: BTreeMap<&str, &ManifestRow> = manifest_rows
-            .iter()
-            .map(|m| (m.policy_id.as_str(), m))
-            .collect();
+        let policies_by_id = latest_policies_by_id(&policies);
+        let manifest_by_id = latest_manifest_by_id(&manifest_rows);
 
         let mut compiled: Vec<CompiledPolicy> = Vec::new();
         let mut binding_ids: Vec<String> = Vec::new();
@@ -164,6 +160,144 @@ impl ResolverCore {
 
         sign_bundle(unsigned, &self.secret)
     }
+
+    /// Compile a per-table [`PolicyManifest`] for every concrete table
+    /// the governance state references, ready to be materialized into a
+    /// serving store (e.g. Redis as protobuf).
+    ///
+    /// Unlike [`ResolverCore::resolve`], this does **not** filter by
+    /// principal: each per-table manifest carries every policy bound to
+    /// that table (across all principal selectors), with `applies_to`
+    /// roles preserved so the serving layer can still filter by role at
+    /// request time. Tag-scoped templates are expanded against the tag
+    /// index per table, exactly as `resolve` does.
+    ///
+    /// Only **concrete** tables are enumerated (from binding targets,
+    /// policy `target_table`s, and table-tag entities). Wildcard targets
+    /// (`*`, `a.b.*`) cannot be enumerated without a catalog table
+    /// listing and remain served by the live resolve path.
+    ///
+    /// Tables with no applicable policies are omitted.
+    pub async fn materialize_tables(&self) -> Result<Vec<(String, PolicyManifest)>, UcError> {
+        let policies = self.backend.policies().await?;
+        let manifest_rows = self.backend.manifest().await?;
+        let bindings = self.backend.bindings().await?;
+        let tags = self.backend.tags().await?;
+
+        let policies_by_id = latest_policies_by_id(&policies);
+        let manifest_by_id = latest_manifest_by_id(&manifest_rows);
+
+        let mut out = Vec::new();
+        for table in enumerate_candidate_tables(&bindings, &policies, &tags) {
+            let manifest =
+                compile_table_manifest(&policies_by_id, &manifest_by_id, &bindings, &tags, &table)?;
+            if !manifest.policies.is_empty() {
+                out.push((table, manifest));
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// Keep only the highest-`version` policy row per `policy_id`.
+///
+/// The editor's write-back **appends** a new version row rather than
+/// rewriting in place, so a `policy_id` may have several rows in the
+/// snapshot; the resolver must treat the newest as authoritative.
+fn latest_policies_by_id(policies: &[PolicyRow]) -> BTreeMap<&str, &PolicyRow> {
+    let mut m: BTreeMap<&str, &PolicyRow> = BTreeMap::new();
+    for p in policies {
+        match m.get(p.policy_id.as_str()) {
+            Some(existing) if existing.version >= p.version => {}
+            _ => {
+                m.insert(p.policy_id.as_str(), p);
+            }
+        }
+    }
+    m
+}
+
+/// Keep only the highest-`version` manifest row per `policy_id` (see
+/// [`latest_policies_by_id`]).
+fn latest_manifest_by_id(rows: &[ManifestRow]) -> BTreeMap<&str, &ManifestRow> {
+    let mut m: BTreeMap<&str, &ManifestRow> = BTreeMap::new();
+    for r in rows {
+        match m.get(r.policy_id.as_str()) {
+            Some(existing) if existing.version >= r.version => {}
+            _ => {
+                m.insert(r.policy_id.as_str(), r);
+            }
+        }
+    }
+    m
+}
+
+/// Compile the full (principal-agnostic) manifest for one concrete
+/// table: every bound policy, tag-expanded, with roles preserved.
+fn compile_table_manifest(
+    policies_by_id: &BTreeMap<&str, &PolicyRow>,
+    manifest_by_id: &BTreeMap<&str, &ManifestRow>,
+    bindings: &[crate::backend::BindingRow],
+    tags: &[TagRow],
+    table: &str,
+) -> Result<PolicyManifest, UcError> {
+    let mut applied: Vec<(i32, String)> = bindings
+        .iter()
+        .filter(|b| target_matches(&b.target, table))
+        .map(|b| (b.precedence, b.policy_id.clone()))
+        .collect();
+    applied.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    let mut seen = std::collections::HashSet::new();
+    applied.retain(|(_, id)| seen.insert(id.clone()));
+
+    let mut compiled: Vec<CompiledPolicy> = Vec::new();
+    for (_, policy_id) in &applied {
+        let Some(pol) = policies_by_id.get(policy_id.as_str()) else {
+            continue;
+        };
+        let Some(man) = manifest_by_id.get(policy_id.as_str()) else {
+            continue;
+        };
+        compiled.push(row_to_compiled(pol, man)?);
+    }
+
+    let (expanded, _audit) = expand_tag_scoped(compiled, tags, table)?;
+    Ok(PolicyManifest {
+        version: "1.0".into(),
+        policies: expanded,
+        principal_contract: None,
+    })
+}
+
+/// True when `t` names a single concrete table (not `*` or `a.b.*`).
+fn is_concrete_table(t: &str) -> bool {
+    t != "*" && !t.ends_with(".*")
+}
+
+/// Distinct concrete tables referenced by binding targets, policy
+/// `target_table`s, and active table-tag entities.
+fn enumerate_candidate_tables(
+    bindings: &[crate::backend::BindingRow],
+    policies: &[PolicyRow],
+    tags: &[TagRow],
+) -> std::collections::BTreeSet<String> {
+    let mut set = std::collections::BTreeSet::new();
+    for b in bindings {
+        if is_concrete_table(&b.target) {
+            set.insert(b.target.clone());
+        }
+    }
+    for p in policies {
+        if is_concrete_table(&p.target_table) {
+            set.insert(p.target_table.clone());
+        }
+    }
+    for t in tags {
+        if t.is_active() && t.is_table() && is_concrete_table(&t.entity) {
+            set.insert(t.entity.clone());
+        }
+    }
+    set
 }
 
 fn target_matches(target: &str, table: &str) -> bool {

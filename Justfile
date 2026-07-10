@@ -191,6 +191,29 @@ uc-full-down:
     docker compose --profile uc-full rm -sf sidecar-uc-full uc-bootstrap unitycatalog minio minio-init || true
 
 # ---------------------------------------------------------------------------
+# Policy playground (profile `playground`)
+#
+# Builds + runs the governed-query playground on :8088. `--demo-table` seeds a
+# self-contained patients Delta table into a volume and registers it as
+# `hospital.clinical.patients`, so the UI works with no Unity Catalog. Open the
+# printed URL, paste Cedar policies + SQL, and see the governed result.
+# ---------------------------------------------------------------------------
+
+# Build + start the playground and wait for it to be healthy.
+playground-up: init
+    docker compose --profile playground up -d --build playground
+    @just _wait-healthy playground
+    @echo "playground UI ready → http://127.0.0.1:{{ env_var_or_default("POLICAST_PLAYGROUND_PORT", "8088") }}"
+
+# Tail playground logs (ctrl-C to exit).
+playground-logs:
+    docker compose --profile playground logs -f playground
+
+# Stop and remove the playground container (keeps the demo-table volume).
+playground-down:
+    docker compose --profile playground rm -sf playground || true
+
+# ---------------------------------------------------------------------------
 # Image builds (explicit; compose builds on demand too)
 # ---------------------------------------------------------------------------
 

@@ -6,6 +6,8 @@ pub mod model;
 pub mod policy_manifest;
 pub mod policy_store;
 pub mod profile;
+#[cfg(feature = "proto")]
+pub mod proto;
 pub mod scaffold;
 
 pub use cedar_parser::parse_policies;
@@ -13,6 +15,8 @@ pub use codegen::{render_identity, IdentityLang};
 pub use error::PolicastError;
 pub use model::{CompiledPolicy, Effect, FilterType, PrincipalContract};
 pub use policy_manifest::PolicyManifest;
+#[cfg(feature = "proto")]
+pub use proto::ProtoError;
 #[cfg(feature = "redis")]
 pub use policy_store::RedisCache;
 pub use policy_store::{

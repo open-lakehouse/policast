@@ -161,6 +161,37 @@ services:
     command: ["/bin/bash"]
     networks: [policast]
 
+  # Governed-query policy playground (profile `playground`). Serves the
+  # SPA + POST /api/query on :8088. `--demo-table` seeds a self-contained
+  # patients Delta table into the `playground-data` volume and registers
+  # it as `hospital.clinical.patients`, so the UI works with no UC.
+  # To test against a real catalog instead, drop `--demo-table` and pass
+  # `--uc-endpoint` / `--uc-auth` (+ `--uc-storage-option`).
+  playground:
+    profiles: ["playground"]
+    build:
+      <<: *build-context
+      target: playground
+    image: policast-playground:local
+    container_name: policast-playground
+    command:
+      [
+        "--listen", "0.0.0.0:8088",
+        "--demo-table", "file:///data/playground/patients",
+      ]
+    ports:
+      - "${POLICAST_PLAYGROUND_PORT:-8088}:8088"
+    volumes:
+      - playground-data:/data/playground
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:8088/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 8s
+    restart: unless-stopped
+    networks: [policast]
+
   # MinIO backing store for the full UC profile. Hosts the
   # `policast-demo` bucket carrying governance delta tables.
   minio:
@@ -252,6 +283,7 @@ volumes:
   cargo-target:
   minio-data:
   uc-full-store:
+  playground-data:
 
 networks:
   policast:

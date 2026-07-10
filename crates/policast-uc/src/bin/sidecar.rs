@@ -137,14 +137,53 @@ struct Cli {
     uc_refresh_interval_secs: u64,
 
     /// Unity Catalog REST endpoint used for per-table metadata and
-    /// temporary credential vending in UC mode.
-    #[arg(long)]
-    uc_endpoint: Option<String>,
+    /// temporary credential vending in UC mode. Defaults to the hosted
+    /// demo catalog; point it at `http://unitycatalog:8080` for local
+    /// docker.
+    #[arg(long, default_value = "https://uc.openlakehousedemos.dev")]
+    uc_endpoint: String,
 
-    /// Name of an env var containing a UC bearer token. Optional; when
-    /// omitted, UC REST requests are sent without Authorization.
+    /// Whether UC REST calls are authenticated. `enable` attaches a
+    /// static bearer token from `--uc-bearer-token-env` (the hosted-UC
+    /// path); `disable` sends no Authorization header (local docker with
+    /// `server.authorization=disable`).
+    #[arg(long, value_enum, default_value_t = AuthToggle::Disable)]
+    uc_auth: AuthToggle,
+
+    /// Name of an env var containing a UC bearer token. Required when
+    /// `--uc-auth enable`; ignored when `--uc-auth disable`.
     #[arg(long)]
     uc_bearer_token_env: Option<String>,
+
+    /// Catalog holding the four `policast` governance tables.
+    #[arg(long, default_value = "governance")]
+    governance_catalog: String,
+
+    /// Schema (inside `--governance-catalog`) holding the governance tables.
+    #[arg(long, default_value = "policast")]
+    governance_schema: String,
+
+    /// Role that may edit any policy regardless of ownership (the
+    /// owner-aware edit API otherwise requires the requester to be the
+    /// policy's `@owner`). Only meaningful with `--backend uc-bootstrap`.
+    #[arg(long, default_value = "governance_admin")]
+    admin_role: String,
+
+    /// Redis URL for the materialized protobuf PolicyStore (e.g.
+    /// `redis://127.0.0.1:6379`). When set (and the binary was built
+    /// with `--features redis`), the governance snapshot is materialized
+    /// into Redis and policy edits re-flush it. Only meaningful with
+    /// `--backend uc-bootstrap`.
+    #[arg(long)]
+    redis_url: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum AuthToggle {
+    /// Authenticate UC REST calls with a static bearer token.
+    Enable,
+    /// Send no Authorization header (local docker / auth off).
+    Disable,
 }
 
 fn parse_kv(input: &str) -> Result<(String, String), String> {
@@ -200,9 +239,13 @@ async fn build_uc_bootstrap_router(
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use std::sync::Arc;
+
     use policast_uc::backend::ResolveBackend;
-    use policast_uc::sidecar::uc_bootstrap_sidecar;
+    use policast_uc::editor::PolicyEditor;
+    use policast_uc::sidecar::{editor_router, uc_bootstrap_sidecar, EditorState};
     use policast_uc::uc_bootstrap::{UcBootstrapBackend, UcBootstrapConfig};
+    use policast_uc::AuthMode;
 
     let storage_options: HashMap<String, String> = cli.uc_storage_options.iter().cloned().collect();
 
@@ -212,26 +255,38 @@ async fn build_uc_bootstrap_router(
         Some(Duration::from_secs(cli.uc_refresh_interval_secs))
     };
 
-    let mut cfg = UcBootstrapConfig::for_example_stack(
-        cli.uc_endpoint
-            .clone()
-            .unwrap_or_else(|| "http://unitycatalog:8080".into()),
-    )
-    .with_storage_options(storage_options);
+    // Resolve the auth toggle into a concrete AuthMode. When enabled,
+    // the bearer token must be supplied via --uc-bearer-token-env.
+    let auth_enabled = cli.uc_auth == AuthToggle::Enable;
+    let token = match cli.uc_bearer_token_env.as_ref() {
+        Some(env) => Some(std::env::var(env).map_err(|_| {
+            format!("env var {env} is not set; use --uc-bearer-token-env to change")
+        })?),
+        None => None,
+    };
+    let auth = AuthMode::from_flag(auth_enabled, token)?;
+
+    let mut cfg = UcBootstrapConfig::for_example_stack(cli.uc_endpoint.clone())
+        .with_storage_options(storage_options)
+        .with_auth(auth.clone());
+    cfg.governance_catalog = cli.governance_catalog.clone();
+    cfg.governance_schema = cli.governance_schema.clone();
 
     if let Some(template) = cli.uc_storage_uri_template.as_ref() {
         cfg = cfg.with_storage_uri_template(template);
     }
-
-    if let Some(token_env) = cli.uc_bearer_token_env.as_ref() {
-        let token = std::env::var(token_env).map_err(|_| {
-            format!("env var {token_env} is not set; use --uc-bearer-token-env to change")
-        })?;
-        cfg = cfg.with_uc_bearer_token(token);
-    }
     cfg.refresh_interval = refresh_interval;
 
     eprintln!("  backend: uc-bootstrap");
+    eprintln!("  uc endpoint:    {}", cli.uc_endpoint);
+    eprintln!(
+        "  uc auth:        {}",
+        if auth.is_enabled() {
+            "enabled (bearer)"
+        } else {
+            "disabled"
+        }
+    );
     eprintln!(
         "  storage template: {}",
         cli.uc_storage_uri_template
@@ -248,6 +303,10 @@ async fn build_uc_bootstrap_router(
             .map(|d| format!("{}s", d.as_secs()))
             .unwrap_or_else(|| "disabled".into())
     );
+
+    // The editor reuses the same governance-table config for its
+    // READ_WRITE write-back path.
+    let editor_cfg = cfg.clone();
 
     let backend = UcBootstrapBackend::bootstrap(cfg)
         .await
@@ -269,7 +328,44 @@ async fn build_uc_bootstrap_router(
         );
     }
 
-    Ok(uc_bootstrap_sidecar(backend, secret))
+    // Owner-aware policy edit API.
+    let editor = Arc::new(PolicyEditor::new(editor_cfg, cli.admin_role.clone()));
+    eprintln!("  admin role:     {}", cli.admin_role);
+    let editor_state = EditorState::new(editor);
+
+    // Optional Redis materialized store + edit reflush.
+    #[cfg(feature = "redis")]
+    let editor_state = {
+        let mut state = editor_state;
+        if let Some(url) = cli.redis_url.as_ref() {
+            use policast_uc::redis_store::RedisManifestStore;
+            use policast_uc::sidecar::Reflush;
+            let store = RedisManifestStore::connect(url)
+                .await
+                .map_err(|e| format!("redis connect ({url}): {e}"))?;
+            let tables = backend
+                .materialize_into(&store)
+                .await
+                .map_err(|e| format!("initial redis materialize: {e}"))?;
+            eprintln!("  redis: materialized {} table(s) to {url}", tables.len());
+            state = state.with_reflush(Reflush {
+                backend: backend.clone(),
+                store,
+            });
+        }
+        state
+    };
+
+    #[cfg(not(feature = "redis"))]
+    if cli.redis_url.is_some() {
+        eprintln!(
+            "  warning: --redis-url set but the binary was built without \
+             the `redis` feature; ignoring"
+        );
+    }
+
+    let base = uc_bootstrap_sidecar(backend, secret);
+    Ok(base.merge(editor_router(editor_state)))
 }
 
 #[cfg(not(feature = "uc-bootstrap"))]

@@ -290,6 +290,24 @@ Introduce `service PolicyResolver`. Prefer **connectRPC at the edge** to keep JS
 3. **Signing model change.** The envelope-over-bytes approach is the clean answer to proto's non-canonical serialization, but it changes how `ResolveBundle` is signed and verified — a deliberate, security-sensitive change to coordinate.
 4. **How far to go.** The structural wins (schema, enums, breaking-change CI) are independent of gRPC/Connect. We can capture them via Phase 1 alone and decide on transport later.
 
+## Phase one status (policast-uc rethink)
+
+A first slice of this RFC has shipped, scoped to **at-rest protobuf for the
+materialized policy store** (not the wire, not signing):
+
+- `proto/policast/v1/policast.proto` is now wired through `prost`. The generated
+  Rust is **checked in** at `crates/policast-core/src/proto/generated/policast.v1.rs`
+  (no `protoc` in the normal build graph; regenerate under `POLICAST_PROTO_REGEN=1`).
+- `policast-core` gained a `proto` feature exposing `proto::v1` plus
+  `PolicyManifest::{to_protobuf,from_protobuf}` and serde↔proto conversions. The
+  enum guards are honored: an `EFFECT_UNSPECIFIED` / `FILTER_TYPE_UNSPECIFIED`
+  (or any unknown number) **fails closed** on decode (`ProtoError::UnspecifiedEnum`).
+- The new `policast-uc::redis_store::RedisManifestStore` stores compiled
+  per-table manifests as **binary protobuf** under `policast:v2:manifest:`.
+- **JSON remains canonical and HMAC-signed on the wire** (Phase 1's "keep JSON on
+  the wire" guidance). The envelope-over-bytes signing change (§4.4) and content
+  negotiation (§4.3) are still future work.
+
 ## Appendix: file/symbol index (where the work lands)
 
 | Concern | File(s) |

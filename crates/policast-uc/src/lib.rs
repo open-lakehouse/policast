@@ -28,11 +28,21 @@ pub mod types;
 #[cfg(feature = "client")]
 pub mod client;
 
+#[cfg(feature = "client")]
+pub mod uc_rest;
+
 #[cfg(feature = "sidecar")]
 pub mod sidecar;
 
 pub mod backend;
 pub mod cdc;
+pub mod exchange;
+
+#[cfg(feature = "redis")]
+pub mod redis_store;
+
+#[cfg(feature = "uc-bootstrap")]
+pub mod editor;
 
 #[cfg(feature = "uc-bootstrap")]
 pub mod uc_bootstrap;
@@ -42,3 +52,9 @@ pub mod seed;
 
 pub use error::UcError;
 pub use types::{Principal, PrincipalAttrs, ResolveBundle, ResolveRequest};
+
+#[cfg(feature = "client")]
+pub use uc_rest::{AuthMode, TableOperation, UcRestClient};
+
+#[cfg(feature = "redis")]
+pub use redis_store::{RedisFirstPolicyStore, RedisManifestStore};
