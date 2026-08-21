@@ -28,7 +28,7 @@
 //! simpler **static storage** path: the config
 //! carries a URI template (e.g. `s3://policast-demo/governance/policast/{table}`)
 //! plus a map of `storage_options` that delta-rs forwards to its
-//! object_store backend. That is enough for the MinIO compose demo
+//! object_store backend. That is enough for the RustFS compose demo
 //! and for unit tests against a local filesystem tempdir. UC REST
 //! vending layers on top in the `uc-bootstrap-credentials` follow-up
 //! without changing the `ResolveBackend` impl.
@@ -100,7 +100,7 @@ pub struct UcBootstrapConfig {
     /// `bindings`, or `tags`. Example values:
     ///
     /// * `s3://policast-demo/governance/policast/{table}` for the
-    ///   MinIO-backed compose stack.
+    ///   RustFS-backed compose stack.
     /// * `file:///var/policast/store/{table}` for a local path.
     ///
     /// If this is `Some(...)`, bootstrap uses static table URIs and
@@ -110,7 +110,7 @@ pub struct UcBootstrapConfig {
 
     /// Storage options forwarded verbatim to
     /// `deltalake::open_table_with_storage_options`. Used to pass
-    /// MinIO credentials, region overrides, etc.
+    /// RustFS credentials, region overrides, etc.
     pub storage_options: HashMap<String, String>,
 }
 
@@ -206,7 +206,7 @@ impl std::fmt::Debug for RefreshGuard {
 }
 
 /// Production [`ResolveBackend`] that snapshots the governance tables
-/// through Unity Catalog (or, in the compose demo, MinIO) and keeps
+/// through Unity Catalog (or, in the compose demo, RustFS) and keeps
 /// them fresh via a periodic refresh task.
 #[derive(Clone)]
 pub struct UcBootstrapBackend {
@@ -1269,7 +1269,7 @@ mod tests {
         seed_governance_tables(&dir, true).await;
         let router = Router::new()
             .route(
-                "/api/2.1/unity-catalog/tables/:full_name",
+                "/api/2.1/unity-catalog/tables/{full_name}",
                 get(table_handler),
             )
             .route(

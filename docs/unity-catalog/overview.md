@@ -14,7 +14,7 @@ only thing that changes versus `open_governed_delta_table` is the
 *source* of the manifest: UC now holds policies, bindings, and identity
 claims inside its own Delta metastore.
 
-For the local end-to-end Compose flow (MinIO + UC OSS + Delta-backed
+For the local end-to-end Compose flow (RustFS + UC OSS + Delta-backed
 sidecar), see [compose.md](./compose.md).
 
 ## Architecture

@@ -333,7 +333,7 @@ impl PlaygroundService {
     }
 
     /// Static storage options merged under any vended credentials
-    /// (region, endpoint, allow-http for MinIO, …).
+    /// (region, endpoint, allow-http for RustFS, …).
     pub fn with_storage_options(mut self, opts: HashMap<String, String>) -> Self {
         self.base_storage_options = opts;
         self

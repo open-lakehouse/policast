@@ -119,7 +119,7 @@ cargo run -p policast-uc --bin policast-uc-sidecar \
     --listen 0.0.0.0:8765 \
     --backend uc-bootstrap \
     --uc-storage-uri-template s3://policast-demo/governance/policast/{table} \
-    --uc-storage-option AWS_ENDPOINT_URL=http://minio:9000 \
+    --uc-storage-option AWS_ENDPOINT_URL=http://rustfs:9000 \
     --uc-storage-option AWS_ACCESS_KEY_ID=... \
     --uc-storage-option AWS_SECRET_ACCESS_KEY=... \
     --uc-storage-option AWS_REGION=us-east-1 \

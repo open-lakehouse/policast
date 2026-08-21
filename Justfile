@@ -130,13 +130,13 @@ compile:
 # ---------------------------------------------------------------------------
 # Spark demo (Compose, profile `spark`)
 #
-# Mirrors the DataFusion demo but on the JVM: a Spark 3.5 (Scala 2.13)
+# Mirrors the DataFusion demo but on the JVM: a Spark 4.2 (Scala 2.13)
 # container runs the policast-spark plugin, which enforces the compiled
 # manifest via Catalyst optimizer rules. The image assembles the plugin jar
 # with sbt (honoring MAVEN_PROXY_URL) in a throwaway build stage.
 # ---------------------------------------------------------------------------
 
-# Build the Spark demo image (sbt assembly -> Spark 3.5 runtime). Goes through
+# Build the Spark demo image (sbt assembly -> Spark 4.2 runtime). Goes through
 # Compose so SPARK_VERSION / SBT_VERSION / MAVEN_PROXY_URL build args flow from
 # .env (a raw `docker build` would miss them and fail behind a Maven firewall).
 spark-build:
@@ -176,10 +176,10 @@ uc-oss-down:
     docker compose --profile uc-oss stop unitycatalog
 
 # Bring up the full UC-backed profile:
-#   minio -> minio-init (bucket) -> unitycatalog -> uc-bootstrap
+#   rustfs -> rustfs-init (bucket) -> unitycatalog -> uc-bootstrap
 #   (seed governance delta tables) -> sidecar-uc-full (--backend uc-bootstrap)
 uc-full-up:
-    docker compose --profile uc-full up -d minio minio-init unitycatalog uc-bootstrap sidecar-uc-full
+    docker compose --profile uc-full up -d rustfs rustfs-init unitycatalog uc-bootstrap sidecar-uc-full
     @just _wait-healthy sidecar-uc-full
 
 # Run the DataFusion demo against the uc-full sidecar.
@@ -188,7 +188,7 @@ uc-full-demo: uc-full-up
 
 # Tear down the uc-full services while leaving the base file-backed flow intact.
 uc-full-down:
-    docker compose --profile uc-full rm -sf sidecar-uc-full uc-bootstrap unitycatalog minio minio-init || true
+    docker compose --profile uc-full rm -sf sidecar-uc-full uc-bootstrap unitycatalog rustfs rustfs-init || true
 
 # ---------------------------------------------------------------------------
 # Policy playground (profile `playground`)

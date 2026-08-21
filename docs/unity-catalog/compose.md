@@ -1,4 +1,4 @@
-# Unity Catalog + MinIO Compose walkthrough (`uc-full`)
+# Unity Catalog + RustFS Compose walkthrough (`uc-full`)
 
 This page documents the **full UC-backed local stack** added in Stage 3.
 
@@ -9,15 +9,15 @@ instead of the flat JSON store.
 
 The `uc-full` profile adds these services on top of the base compose stack:
 
-1. `minio` — object storage for the `policast-demo` bucket.
-2. `minio-init` — one-shot bucket bootstrap.
+1. `rustfs` — S3-compatible object storage for the `policast-demo` bucket.
+2. `rustfs-init` — one-shot bucket bootstrap (AWS CLI against the RustFS S3 API).
 3. `unitycatalog` — pinned to `newfrontdocker/unitycatalog:v0.4.1`.
 4. `uc-bootstrap` — one-shot init that:
    - discovers `examples/uc/ddl/*.sql` inputs,
    - seeds governance Delta tables (`policies`, `manifest`, `bindings`, `tags`)
      via `policast-uc-seed`.
 5. `sidecar-uc-full` — runs `policast-uc-sidecar --backend uc-bootstrap`
-   against MinIO-backed Delta tables.
+   against RustFS-backed Delta tables.
 
 The default `sidecar` service (flat-file backend) remains unchanged.
 
@@ -31,7 +31,8 @@ Optional knobs in `.env`:
 
 - `POLICAST_UC_FULL_PORT` (default `8766`) — host port for `sidecar-uc-full`.
 - `POLICAST_UC_REFRESH_SECS` (default `30`) — snapshot refresh interval.
-- `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_REGION`.
+- `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`, `S3_REGION` (RustFS credentials/region).
+- `RUSTFS_API_PORT` (default `9000`), `RUSTFS_CONSOLE_PORT` (default `9001`).
 
 ## Bring up uc-full
 
@@ -43,7 +44,7 @@ Equivalent raw compose command:
 
 ```bash
 docker compose --profile uc-full up -d \
-  minio minio-init unitycatalog uc-bootstrap sidecar-uc-full
+  rustfs rustfs-init unitycatalog uc-bootstrap sidecar-uc-full
 ```
 
 Health check:
@@ -86,7 +87,7 @@ docker compose logs uc-bootstrap
 
 Common causes:
 
-- Missing/invalid MinIO credentials in `.env`.
+- Missing/invalid RustFS credentials in `.env`.
 - Existing governance tables from a previous run with incompatible schema.
 - Network reachability problems between compose services.
 
