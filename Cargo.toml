@@ -23,8 +23,8 @@ thiserror = "2"
 async-trait = "0.1"
 tokio = { version = "1" }
 clap = { version = "4", features = ["derive"] }
-cel-interpreter = "0.8"
-cel-parser = "0.7"
+cel-interpreter = "0.10"
+cel-parser = "0.10"
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
@@ -32,14 +32,16 @@ lru = "0.12"
 time = { version = "0.3", features = ["serde", "serde-well-known"] }
 parking_lot = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-axum = "0.7"
-tower = "0.4"
-tower-http = { version = "0.5", features = ["trace"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
 # Pinned together: deltalake-core's transitive `chrono` pin is exact, so a
 # mismatched deltalake anywhere in the workspace (even behind an optional
-# feature) makes the lockfile unresolvable.
-datafusion = "53"
-deltalake = { version = "0.32.3", features = ["datafusion"] }
+# feature) makes the lockfile unresolvable. deltalake 0.32.x (via
+# deltalake-core) requires `datafusion ^53.1`, which caps datafusion at the
+# 53.x line — bumping to datafusion 54.x would mean dropping/replacing deltalake.
+datafusion = "53.1"
+deltalake = { version = "0.32.4", features = ["datafusion"] }
 # Dev-only shared deps.
 pretty_assertions = "1"
 tempfile = "3"

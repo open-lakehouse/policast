@@ -7,7 +7,7 @@
 //!     --uc-endpoint https://uc.openlakehousedemos.dev \
 //!     --uc-auth enable --uc-bearer-token-env UC_TOKEN
 //!
-//! # Against local docker UC (auth off) backed by MinIO:
+//! # Against local docker UC (auth off) backed by RustFS:
 //! cargo run -p policast-playground -- \
 //!     --uc-endpoint http://localhost:8080 --uc-auth disable \
 //!     --uc-storage-option AWS_ENDPOINT_URL=http://localhost:9000 \

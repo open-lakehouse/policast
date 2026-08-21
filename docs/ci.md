@@ -45,7 +45,7 @@ is toolchain-independent.
 
 ### `spark` — Spark version matrix
 
-The `spark` job runs across a Spark version matrix. Today only **`4.1.2`** is
+The `spark` job runs across a Spark version matrix. Today only **`4.2.0`** is
 supported — it matches `docker/Dockerfile`'s `SPARK_VERSION` and the default in
 `policast-spark/build.sbt`. `build.sbt` reads `SPARK_VERSION` from the
 environment, so adding a new row to the matrix is enough to build/test against
@@ -55,10 +55,10 @@ artifact (`policast-spark-assembly-<version>`).
 ### `smoke` — full docker end-to-end (advisory, opt-in)
 
 `smoke` runs the whole compose stack (`just ci-smoke`): the resolver sidecar,
-the DataFusion demos, Unity Catalog OSS, the `uc-full` MinIO-backed flow, and
+the DataFusion demos, Unity Catalog OSS, the `uc-full` RustFS-backed flow, and
 the Spark governance demo. It is the most thorough check but also the most
 expensive (~30-90 min) and the only one that depends on **external images**
-(`newfrontdocker/unitycatalog`, `minio/minio`), which makes it more prone to
+(`newfrontdocker/unitycatalog`, `rustfs/rustfs`), which makes it more prone to
 flakiness outside our control.
 
 For those reasons it does **not** run on every PR. It triggers on:
@@ -66,7 +66,7 @@ For those reasons it does **not** run on every PR. It triggers on:
 | Trigger | Mechanism |
 |---------|-----------|
 | Push to `main` | `on.push.branches: [main]` |
-| Nightly | `on.schedule` cron `0 7 * * *` (07:00 UTC) |
+| Weekly | `on.schedule` cron `0 7 * * 0` (Sundays 07:00 UTC) |
 | Manual | `workflow_dispatch` |
 | Opt-in on a PR | add the **`run-smoke`** label to the pull request |
 
@@ -101,13 +101,13 @@ Recommended policy for the `main` branch:
 | `lint (fmt + clippy)` | **REQUIRED** | Cheap, deterministic, no external deps. |
 | `rust stable (build + test)` | **REQUIRED** | Core correctness on the primary toolchain. |
 | `rust 1.96 (build + test)` | **REQUIRED** | Guarantees the image's pinned toolchain builds. |
-| `spark 4.1.2 (build + test)` | **REQUIRED** | Core correctness of the Spark plugin. |
-| `full smoke (docker compose)` | **ADVISORY** | Expensive + depends on external images; runs opt-in / nightly, not on every PR, so it cannot be a required check without blocking routine merges. |
+| `spark 4.2.0 (build + test)` | **REQUIRED** | Core correctness of the Spark plugin. |
+| `full smoke (docker compose)` | **ADVISORY** | Expensive + depends on external images; runs opt-in / weekly, not on every PR, so it cannot be a required check without blocking routine merges. |
 
 The docker `smoke` is intentionally **advisory**: because it does not run on
 every PR (and pulls external images that can rate-limit or change underneath
 us), making it a required status check would block merges on a job that is
-frequently absent. Treat a red nightly/`run-smoke` smoke as a signal to
+frequently absent. Treat a red weekly/`run-smoke` smoke as a signal to
 investigate, not as a merge gate.
 
 ### Applying branch protection
@@ -126,7 +126,7 @@ gh api -X PUT repos/<org>/<repo>/branches/main/protection \
   -f 'required_status_checks[contexts][]=lint (fmt + clippy)' \
   -f 'required_status_checks[contexts][]=rust stable (build + test)' \
   -f 'required_status_checks[contexts][]=rust 1.96 (build + test)' \
-  -f 'required_status_checks[contexts][]=spark 4.1.2 (build + test)' \
+  -f 'required_status_checks[contexts][]=spark 4.2.0 (build + test)' \
   -F 'enforce_admins=true' \
   -F 'required_pull_request_reviews[required_approving_review_count]=1' \
   -F 'restrictions=null'

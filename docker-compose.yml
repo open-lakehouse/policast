@@ -8,8 +8,8 @@
 #   docker compose --profile shell run --rm df-shell         # interactive dev shell
 #   docker compose --profile uc-oss up -d unitycatalog       # UC OSS server only
 #   docker compose --profile uc-full up -d \
-#     minio minio-init unitycatalog uc-bootstrap sidecar-uc-full
-#                                                       # full UC + MinIO flow
+#     rustfs rustfs-init unitycatalog uc-bootstrap sidecar-uc-full
+#                                                       # full UC + RustFS flow
 #
 # See docker/README.md for the full walkthrough and known limitations.
 
@@ -101,7 +101,7 @@ services:
     networks: [policast]
 
   # Spark enforcement path. Builds the policast-spark assembly jar with sbt in
-  # a throwaway stage, then runs RunSpark on a Scala 2.13 Spark 3.5 runtime.
+  # a throwaway stage, then runs RunSpark on a Scala 2.13 Spark 4.2 runtime.
   # No sidecar: the plugin enforces the file-based compiled manifest directly.
   spark-demo:
     profiles: ["spark"]
@@ -109,7 +109,7 @@ services:
       <<: *build-context
       target: spark-demo
       args:
-        SPARK_VERSION: ${SPARK_VERSION:-4.1.2}
+        SPARK_VERSION: ${SPARK_VERSION:-4.2.0}
         SBT_VERSION: ${SBT_VERSION:-1.12.4}
         MAVEN_PROXY_URL: ${MAVEN_PROXY_URL:-}
         # Assembly jar source (see docker/Dockerfile stage 7c). Default builds
@@ -192,44 +192,70 @@ services:
     restart: unless-stopped
     networks: [policast]
 
-  # MinIO backing store for the full UC profile. Hosts the
-  # `policast-demo` bucket carrying governance delta tables.
-  minio:
+  # RustFS backing store for the full UC profile — an S3-compatible object store
+  # that replaces the former MinIO service. Hosts the `policast-demo` bucket
+  # carrying the governance delta tables. S3 API on :9000, web console on :9001
+  # (log in with RUSTFS_ACCESS_KEY / RUSTFS_SECRET_KEY). Modeled on the
+  # unitycatalog-playground RustFS service, but self-contained: it owns its own
+  # `rustfs-data` volume rather than sharing that project's store.
+  rustfs:
     profiles: ["uc-full"]
-    image: ${MINIO_IMAGE:-minio/minio:latest}
-    container_name: policast-minio
-    command: ["server", "/data", "--console-address", ":9001"]
+    image: ${RUSTFS_IMAGE:-rustfs/rustfs:latest}
+    container_name: policast-rustfs
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${RUSTFS_API_PORT:-9000}:9000"
+      - "${RUSTFS_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:9000/minio/health/live"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 5s
+      # A named volume inherits the image's /data ownership on first init, so no
+      # permission helper is needed (unlike a host bind mount).
+      - rustfs-data:/data
     restart: unless-stopped
     networks: [policast]
 
-  # One-shot bucket bootstrap for MinIO.
-  minio-init:
+  # One-shot bucket bootstrap for RustFS: waits for the S3 API to answer, then
+  # creates the `policast-demo` bucket if it does not already exist. Uses the AWS
+  # CLI against RustFS's S3-compatible endpoint. RustFS accepts the root key
+  # directly, so no STS/AssumeRole session token is needed here — uc-bootstrap
+  # writes governance Delta with those static credentials via delta-rs.
+  rustfs-init:
     profiles: ["uc-full"]
-    image: minio/mc:latest
-    container_name: policast-minio-init
+    image: amazon/aws-cli:latest
+    container_name: policast-rustfs-init
     depends_on:
-      minio:
-        condition: service_healthy
+      rustfs:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      AWS_DEFAULT_REGION: ${S3_REGION:-us-east-1}
+    # Shell variables are escaped as `$$` so docker compose passes a literal `$`
+    # to the container instead of interpolating them at config-parse time.
     entrypoint:
-      [
-        "/bin/sh",
-        "-ec",
-        "mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} && mc mb -p local/policast-demo && mc ls local/policast-demo",
-      ]
+      - /bin/sh
+      - -ec
+      - |
+        endpoint="http://rustfs:9000"
+        echo "[rustfs-init] waiting for RustFS at $$endpoint ..."
+        i=0
+        until aws --endpoint-url "$$endpoint" s3api list-buckets >/dev/null 2>&1; do
+          i=$$((i + 1))
+          [ "$$i" -ge 60 ] && { echo "[rustfs-init] RustFS did not become ready in time" >&2; exit 1; }
+          sleep 2
+        done
+        if aws --endpoint-url "$$endpoint" s3api head-bucket --bucket policast-demo >/dev/null 2>&1; then
+          echo "[rustfs-init] bucket s3://policast-demo already exists"
+        else
+          echo "[rustfs-init] creating bucket s3://policast-demo"
+          aws --endpoint-url "$$endpoint" s3api create-bucket --bucket policast-demo >/dev/null
+        fi
+        aws --endpoint-url "$$endpoint" s3 ls
     restart: "no"
     networks: [policast]
 
@@ -245,7 +271,7 @@ services:
     networks: [policast]
 
   # One-shot bootstrap: validates the DDL inputs and publishes the
-  # shipped template manifest + bindings + tags into MinIO-backed
+  # shipped template manifest + bindings + tags into RustFS-backed
   # governance Delta tables (`policies`, `manifest`, `bindings`,
   # `tags`) via the `policast-uc-seed` binary.
   uc-bootstrap:
@@ -256,7 +282,7 @@ services:
     image: policast-shell:local
     container_name: policast-uc-bootstrap
     depends_on:
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       unitycatalog:
         condition: service_started
@@ -265,10 +291,10 @@ services:
       POLICAST_UC_ENDPOINT: http://unitycatalog:8080
       POLICAST_STORE_ROOT: examples/uc/store
       POLICAST_UC_STORAGE_URI_TEMPLATE: file:///workspace/.uc-full-store/{table}
-      MINIO_ENDPOINT_URL: http://minio:9000
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      S3_REGION: ${S3_REGION:-us-east-1}
     volumes:
       - .:/workspace
       - uc-full-store:/workspace/.uc-full-store
@@ -281,7 +307,7 @@ services:
 volumes:
   cargo-registry:
   cargo-target:
-  minio-data:
+  rustfs-data:
   uc-full-store:
   playground-data:
 

@@ -1,10 +1,10 @@
 //! Seed the four governance Delta tables from any [`ResolveBackend`].
 //!
-//! The compose `uc-full` profile ships with an S3-compatible MinIO
+//! The compose `uc-full` profile ships with an S3-compatible RustFS
 //! bucket but no preloaded governance data. This module is what the
 //! `policast-uc-seed` binary (see `src/bin/seed.rs`) uses to translate
 //! the committed flat-file store under `examples/uc/store/` into real
-//! Delta tables on MinIO so the sidecar can then serve traffic via
+//! Delta tables on RustFS so the sidecar can then serve traffic via
 //! [`crate::uc_bootstrap::UcBootstrapBackend`].
 //!
 //! Correctness property: the Arrow schemas here MUST stay in lock-step
@@ -42,7 +42,7 @@ pub struct SeedConfig {
     pub storage_uri_template: String,
     /// Storage options forwarded verbatim to `deltalake`'s
     /// `object_store` backend (see
-    /// [`UcBootstrapConfig::storage_options`] for the MinIO shape).
+    /// [`UcBootstrapConfig::storage_options`] for the RustFS shape).
     ///
     /// [`UcBootstrapConfig::storage_options`]: crate::uc_bootstrap::UcBootstrapConfig::storage_options
     pub storage_options: HashMap<String, String>,

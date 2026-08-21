@@ -14,7 +14,7 @@
 //!
 //!   Two table-access modes are supported:
 //!   1. static URI template + storage options (`--uc-storage-*`) for
-//!      MinIO/local demos,
+//!      RustFS/local demos,
 //!   2. per-table UC REST location + temporary credential vending when
 //!      `--uc-storage-uri-template` is omitted.
 //!
@@ -29,7 +29,7 @@
 //!     --signing-secret-env POLICAST_UC_SECRET
 //! ```
 //!
-//! UC-bootstrap example (MinIO-backed compose demo):
+//! UC-bootstrap example (RustFS-backed compose demo):
 //!
 //! ```bash
 //! cargo run -p policast-uc --bin policast-uc-sidecar \
@@ -37,7 +37,7 @@
 //!     --listen 0.0.0.0:8765 \
 //!     --backend uc-bootstrap \
 //!     --uc-storage-uri-template s3://policast-demo/governance/policast/{table} \
-//!     --uc-storage-option AWS_ENDPOINT_URL=http://minio:9000 \
+//!     --uc-storage-option AWS_ENDPOINT_URL=http://rustfs:9000 \
 //!     --uc-storage-option AWS_ACCESS_KEY_ID=... \
 //!     --uc-storage-option AWS_SECRET_ACCESS_KEY=... \
 //!     --uc-storage-option AWS_REGION=us-east-1 \
@@ -118,10 +118,10 @@ struct Cli {
     uc_storage_uri_template: Option<String>,
 
     /// Key=value pair forwarded verbatim to `delta-rs`'s object_store
-    /// backend. May be repeated. Typical MinIO shape:
+    /// backend. May be repeated. Typical RustFS shape:
     ///
     /// ```text
-    /// --uc-storage-option AWS_ENDPOINT_URL=http://minio:9000
+    /// --uc-storage-option AWS_ENDPOINT_URL=http://rustfs:9000
     /// --uc-storage-option AWS_ACCESS_KEY_ID=...
     /// --uc-storage-option AWS_SECRET_ACCESS_KEY=...
     /// --uc-storage-option AWS_REGION=us-east-1

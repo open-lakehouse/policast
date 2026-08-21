@@ -106,9 +106,9 @@ impl IntoResponse for SidecarError {
 // Owner-aware policy edit API (feature = "uc-bootstrap").
 //
 // Three routes layered on top of the resolve sidecar:
-//   GET  /policies/:id           -> current version (cedar, version, owner, cel)
-//   POST /policies/:id/validate  -> compile-only dry run
-//   PUT  /policies/:id           -> owner/admin-checked edit + version append
+//   GET  /policies/{id}          -> current version (cedar, version, owner, cel)
+//   POST /policies/{id}/validate -> compile-only dry run
+//   PUT  /policies/{id}          -> owner/admin-checked edit + version append
 //
 // On a successful edit, if a reflush target is configured, the
 // governance snapshot is refreshed and re-materialized into Redis so
@@ -176,8 +176,8 @@ mod editor_api {
     /// merge into the resolve sidecar router.
     pub fn editor_router(state: EditorState) -> Router {
         Router::new()
-            .route("/policies/:id", get(get_policy).put(put_policy))
-            .route("/policies/:id/validate", post(validate_policy))
+            .route("/policies/{id}", get(get_policy).put(put_policy))
+            .route("/policies/{id}/validate", post(validate_policy))
             .with_state(state)
     }
 
@@ -384,7 +384,7 @@ mod tests {
     /// Drives the uc-bootstrap constructor end-to-end through the Axum
     /// router. Mirrors `test_resolve_endpoint_roundtrip` but against a
     /// tempdir full of hand-built Delta fixtures — the same shape the
-    /// production MinIO compose flow runs against.
+    /// production RustFS compose flow runs against.
     #[cfg(feature = "uc-bootstrap")]
     #[tokio::test]
     async fn test_uc_bootstrap_sidecar_roundtrip() {

@@ -14,7 +14,7 @@ name: CI
 #              Spark version matrix, uploading the assembly jar per version (#13).
 #   - smoke  : the *full* docker-compose end-to-end smoke (`just ci-smoke`) plus
 #              the Spark governance demo. ADVISORY / opt-in: it only runs on push
-#              to main, the nightly schedule, manual dispatch, or a PR carrying
+  #              to main, the weekly schedule, manual dispatch, or a PR carrying
 #              the `run-smoke` label (#12). It reuses the `spark` job's assembly
 #              artifact instead of rebuilding it with sbt in Docker (#14) and
 #              caches Docker layers through the GHA buildx backend (#11).
@@ -29,8 +29,8 @@ on:
     # because specifying `types` overrides the defaults.
     types: [opened, synchronize, reopened, labeled]
   schedule:
-    # Nightly full smoke at 07:00 UTC against the default branch.
-    - cron: "0 7 * * *"
+    # Weekly full smoke at 07:00 UTC on Sundays against the default branch.
+    - cron: "0 7 * * 0"
   workflow_dispatch:
 
 # Cancel superseded runs on the same ref to save CI minutes.
@@ -126,7 +126,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Spark: build + test the policast-spark plugin natively (sbt, JDK 17).
-  # Matrix (#13) over the supported Spark version(s). Only 4.1.2 is supported
+  # Matrix (#13) over the supported Spark version(s). Only 4.2.0 is supported
   # today (it matches docker/Dockerfile SPARK_VERSION and the default in
   # policast-spark/build.sbt); add rows as new Spark 4.x lines are validated.
   # SPARK_VERSION is exported so build.sbt resolves spark-* deps for that line,
@@ -139,7 +139,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        spark: ["4.1.2"]
+        spark: ["4.2.0"]
     env:
       SPARK_VERSION: ${{ matrix.spark }}
     defaults:
@@ -178,13 +178,13 @@ jobs:
   # ---------------------------------------------------------------------------
   # Full docker-compose smoke: `just ci-smoke` (scripts/ci-smoke.sh) + the Spark
   # governance demo. Builds/uses the sidecar/demo/shell/spark images and runs
-  # the end-to-end demos, UC OSS, and the uc-full MinIO flow.
+  # the end-to-end demos, UC OSS, and the uc-full RustFS flow.
   #
   # ADVISORY + opt-in (#12): this job is intentionally NOT run on every PR
-  # because the docker builds + external images (Unity Catalog OSS, MinIO) cost
+  # because the docker builds + external images (Unity Catalog OSS, RustFS) cost
   # ~30-90 minutes. It runs on:
   #   - push to main
-  #   - the nightly schedule
+  #   - the weekly schedule
   #   - workflow_dispatch (manual)
   #   - a pull_request labeled `run-smoke` (add the label to opt a PR in)
   # See docs/ci.md for the required-vs-advisory rationale + branch protection.
@@ -203,7 +203,7 @@ jobs:
     env:
       # Spark line the docker smoke exercises. Matches docker/Dockerfile's pinned
       # SPARK_VERSION and the artifact uploaded by the `spark` job above.
-      SPARK_SMOKE_VERSION: "4.1.2"
+      SPARK_SMOKE_VERSION: "4.2.0"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -301,7 +301,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=spark-demo
 
       # `just ci-smoke` runs `just init` itself and exercises the sidecar,
-      # DataFusion demos, UC OSS, and the uc-full MinIO flow. The images above
+      # DataFusion demos, UC OSS, and the uc-full RustFS flow. The images above
       # are already loaded, so no rebuilds happen here.
       - name: Run full smoke
         run: just ci-smoke

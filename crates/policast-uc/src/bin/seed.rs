@@ -1,18 +1,18 @@
 //! `policast-uc-seed` — one-shot binary that publishes the four
 //! governance Delta tables from a flat-file store root into an object
-//! store (typically MinIO for the compose `uc-full` profile, or real
+//! store (typically RustFS for the compose `uc-full` profile, or real
 //! S3 / ADLS / GCS for production).
 //!
-//! Example against a local MinIO running in the compose stack:
+//! Example against a local RustFS running in the compose stack:
 //!
 //! ```bash
 //! cargo run -p policast-uc --bin policast-uc-seed \
 //!     --features sidecar,uc-bootstrap -- \
 //!     --store-root examples/uc/store \
 //!     --storage-uri-template s3://policast-demo/governance/policast/{table} \
-//!     --storage-option AWS_ENDPOINT_URL=http://minio:9000 \
-//!     --storage-option AWS_ACCESS_KEY_ID=minioadmin \
-//!     --storage-option AWS_SECRET_ACCESS_KEY=minioadmin \
+//!     --storage-option AWS_ENDPOINT_URL=http://rustfs:9000 \
+//!     --storage-option AWS_ACCESS_KEY_ID=rustfsadmin \
+//!     --storage-option AWS_SECRET_ACCESS_KEY=rustfsadmin \
 //!     --storage-option AWS_REGION=us-east-1 \
 //!     --storage-option AWS_ALLOW_HTTP=true
 //! ```

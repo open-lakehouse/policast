@@ -1,8 +1,11 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
-use cel_parser::{ArithmeticOp, Atom, Expression, Member, RelationOp, UnaryOp};
+use cel_parser::ast::{operators, CallExpr, Expr as CelExpr, IdedExpr, SelectExpr};
+use cel_parser::reference::Val;
+use cel_parser::Parser;
 use datafusion::common::ScalarValue;
 use datafusion::logical_expr::{col, lit, not, Expr};
 
@@ -56,13 +59,33 @@ pub fn cel_to_datafusion_expr(
     cel: &str,
     identity: &dyn PrincipalProvider,
 ) -> Result<Option<Expr>, CelConvertError> {
-    let parsed = cel_parser::parse(cel).map_err(|e| CelConvertError::ParseError(e.to_string()))?;
+    let parsed = parse_cel(cel)?;
     let resolved = convert_expr(&parsed, identity)?;
     match resolved {
         Resolved::Scalar(ScalarValue::Boolean(Some(true))) => Ok(None),
         Resolved::Scalar(ScalarValue::Boolean(Some(false))) => Ok(Some(lit(false))),
         Resolved::Scalar(_) => Ok(None),
         Resolved::DynExpr(expr) => Ok(Some(expr)),
+    }
+}
+
+/// Parse a CEL expression into its AST, fail-safe against parser panics.
+///
+/// cel-parser 0.10 uses an ANTLR-generated backend that can *panic* on some
+/// malformed inputs instead of returning a parse error. Governance enforcement
+/// runs on the query hot path and must never crash the engine, so we trap any
+/// unwind and surface it as an ordinary [`CelConvertError::ParseError`]. The
+/// closure returns `Result<_, String>` (not the parser's error type) to keep
+/// the caught value `UnwindSafe`.
+fn parse_cel(cel: &str) -> Result<IdedExpr, CelConvertError> {
+    match catch_unwind(AssertUnwindSafe(|| {
+        Parser::new().parse(cel).map_err(|e| e.to_string())
+    })) {
+        Ok(Ok(expr)) => Ok(expr),
+        Ok(Err(msg)) => Err(CelConvertError::ParseError(msg)),
+        Err(_) => Err(CelConvertError::ParseError(format!(
+            "CEL parser panicked on expression {cel:?}"
+        ))),
     }
 }
 
@@ -79,7 +102,20 @@ pub fn cel_to_bool(
 ) -> Result<bool, CelConvertError> {
     use cel_interpreter::{Context, Program, Value};
 
-    let program = Program::compile(cel).map_err(|e| CelConvertError::ParseError(e.to_string()))?;
+    // Same fail-safe rationale as `parse_cel`: `Program::compile` runs the same
+    // ANTLR-based parser, which can panic on malformed input. Trap it so a bad
+    // mask expression fails closed (masks) instead of crashing the engine.
+    let program = match catch_unwind(AssertUnwindSafe(|| {
+        Program::compile(cel).map_err(|e| e.to_string())
+    })) {
+        Ok(Ok(program)) => program,
+        Ok(Err(msg)) => return Err(CelConvertError::ParseError(msg)),
+        Err(_) => {
+            return Err(CelConvertError::ParseError(format!(
+                "CEL parser panicked on expression {cel:?}"
+            )))
+        }
+    };
 
     let mut ctx = Context::default();
 
@@ -108,13 +144,16 @@ pub fn cel_to_bool(
 // ---------------------------------------------------------------------------
 
 fn convert_expr(
-    expr: &Expression,
+    node: &IdedExpr,
     identity: &dyn PrincipalProvider,
 ) -> Result<Resolved, CelConvertError> {
-    match expr {
-        Expression::Atom(atom) => convert_atom(atom),
+    match &node.expr {
+        // Scalar literals (`1`, `"x"`, `true`, `null`, ...).
+        CelExpr::Literal(val) => convert_val(val),
 
-        Expression::Ident(name) => match name.as_str() {
+        // Bare identifiers. `true`/`false`/`null` normally parse as literals,
+        // but keep this arm as a defensive fallback for any that reach here.
+        CelExpr::Ident(name) => match name.as_str() {
             "true" => Ok(Resolved::Scalar(ScalarValue::Boolean(Some(true)))),
             "false" => Ok(Resolved::Scalar(ScalarValue::Boolean(Some(false)))),
             "null" => Ok(Resolved::Scalar(ScalarValue::Null)),
@@ -123,36 +162,12 @@ fn convert_expr(
             ))),
         },
 
-        Expression::Member(left, member) => convert_member(left, member, identity),
+        // Field selection: `resource.<col>` / `principal.<attr>`.
+        CelExpr::Select(select) => convert_select(select, identity),
 
-        Expression::Relation(left, op, right) => {
-            let l = convert_expr(left, identity)?;
-            let r = convert_expr(right, identity)?;
-            convert_relation(l, op, r)
-        }
-
-        Expression::And(left, right) => {
-            let l = convert_expr(left, identity)?;
-            let r = convert_expr(right, identity)?;
-            convert_and(l, r)
-        }
-
-        Expression::Or(left, right) => {
-            let l = convert_expr(left, identity)?;
-            let r = convert_expr(right, identity)?;
-            convert_or(l, r)
-        }
-
-        Expression::Unary(op, inner) => {
-            let inner = convert_expr(inner, identity)?;
-            convert_unary(op, inner)
-        }
-
-        Expression::Arithmetic(left, op, right) => {
-            let l = convert_expr(left, identity)?;
-            let r = convert_expr(right, identity)?;
-            convert_arithmetic(l, op, r)
-        }
+        // In CEL's canonical AST every operator is a function call
+        // (`_==_`, `_&&_`, `!_`, `_+_`, ...); see `cel_parser::ast::operators`.
+        CelExpr::Call(call) => convert_call(call, identity),
 
         other => Err(CelConvertError::UnsupportedExpression(format!("{other:?}"))),
     }
@@ -162,32 +177,41 @@ fn convert_expr(
 // Leaf converters
 // ---------------------------------------------------------------------------
 
-fn convert_atom(atom: &Atom) -> Result<Resolved, CelConvertError> {
-    match atom {
-        Atom::Int(v) => Ok(Resolved::Scalar(ScalarValue::Int64(Some(*v)))),
-        Atom::UInt(v) => Ok(Resolved::Scalar(ScalarValue::UInt64(Some(*v)))),
-        Atom::Float(v) => Ok(Resolved::Scalar(ScalarValue::Float64(Some(*v)))),
-        Atom::String(v) => Ok(Resolved::Scalar(ScalarValue::Utf8(Some(v.to_string())))),
-        Atom::Bool(v) => Ok(Resolved::Scalar(ScalarValue::Boolean(Some(*v)))),
-        Atom::Null => Ok(Resolved::Scalar(ScalarValue::Null)),
-        Atom::Bytes(_) => Err(CelConvertError::UnsupportedExpression(
-            "byte literals".into(),
-        )),
-    }
+fn convert_val(val: &Val) -> Result<Resolved, CelConvertError> {
+    let scalar = match val {
+        Val::Int(v) => ScalarValue::Int64(Some(*v)),
+        Val::UInt(v) => ScalarValue::UInt64(Some(*v)),
+        Val::Double(v) => ScalarValue::Float64(Some(*v)),
+        Val::String(v) => ScalarValue::Utf8(Some(v.clone())),
+        Val::Boolean(v) => ScalarValue::Boolean(Some(*v)),
+        Val::Null => ScalarValue::Null,
+        Val::Bytes(_) => {
+            return Err(CelConvertError::UnsupportedExpression(
+                "byte literals".into(),
+            ))
+        }
+    };
+    Ok(Resolved::Scalar(scalar))
 }
 
-fn convert_member(
-    left: &Expression,
-    member: &Member,
+fn convert_select(
+    select: &SelectExpr,
     identity: &dyn PrincipalProvider,
 ) -> Result<Resolved, CelConvertError> {
-    match (left, member) {
-        (Expression::Ident(obj), Member::Attribute(field)) if obj.as_str() == "resource" => {
-            Ok(Resolved::DynExpr(col(field.as_str())))
+    // Presence tests (`has(x.y)`) cannot be translated to a column predicate.
+    if select.test {
+        return Err(CelConvertError::UnsupportedExpression(
+            "presence test (has)".into(),
+        ));
+    }
+
+    match &select.operand.expr {
+        CelExpr::Ident(obj) if obj == "resource" => {
+            Ok(Resolved::DynExpr(col(select.field.as_str())))
         }
 
-        (Expression::Ident(obj), Member::Attribute(field)) if obj.as_str() == "principal" => {
-            resolve_principal_field(field, identity)
+        CelExpr::Ident(obj) if obj == "principal" => {
+            resolve_principal_field(&select.field, identity)
         }
 
         _ => Err(CelConvertError::UnsupportedExpression(
@@ -217,20 +241,102 @@ fn resolved_to_expr(r: Resolved) -> Expr {
     }
 }
 
+/// Dispatch an operator call (`func_name` is one of `cel_parser::ast::operators`)
+/// to the matching converter. Only pure boolean / comparison / arithmetic
+/// operators are supported; method calls and macros are rejected.
+fn convert_call(
+    call: &CallExpr,
+    identity: &dyn PrincipalProvider,
+) -> Result<Resolved, CelConvertError> {
+    // A `target` means a receiver-style call such as `x.startsWith(y)`; only
+    // free-function operator calls are translatable to a column predicate.
+    if call.target.is_some() {
+        return Err(CelConvertError::UnsupportedExpression(format!(
+            "method call '{}'",
+            call.func_name
+        )));
+    }
+
+    match call.func_name.as_str() {
+        operators::LOGICAL_NOT => convert_not(convert_unary_arg(call, identity)?),
+        operators::NEGATE => convert_negate(convert_unary_arg(call, identity)?),
+        operators::LOGICAL_AND => {
+            let (l, r) = convert_binary_args(call, identity)?;
+            convert_and(l, r)
+        }
+        operators::LOGICAL_OR => {
+            let (l, r) = convert_binary_args(call, identity)?;
+            convert_or(l, r)
+        }
+        operators::EQUALS
+        | operators::NOT_EQUALS
+        | operators::LESS
+        | operators::LESS_EQUALS
+        | operators::GREATER
+        | operators::GREATER_EQUALS => {
+            let (l, r) = convert_binary_args(call, identity)?;
+            convert_relation(call.func_name.as_str(), l, r)
+        }
+        operators::ADD
+        | operators::SUBSTRACT
+        | operators::MULTIPLY
+        | operators::DIVIDE
+        | operators::MODULO => {
+            let (l, r) = convert_binary_args(call, identity)?;
+            convert_arithmetic(call.func_name.as_str(), l, r)
+        }
+        operators::IN => Err(CelConvertError::UnsupportedExpression(
+            "'in' operator".into(),
+        )),
+        other => Err(CelConvertError::UnsupportedExpression(format!(
+            "function/operator '{other}'"
+        ))),
+    }
+}
+
+fn convert_unary_arg(
+    call: &CallExpr,
+    identity: &dyn PrincipalProvider,
+) -> Result<Resolved, CelConvertError> {
+    match call.args.as_slice() {
+        [arg] => convert_expr(arg, identity),
+        _ => Err(CelConvertError::UnsupportedExpression(format!(
+            "operator '{}' expects 1 argument",
+            call.func_name
+        ))),
+    }
+}
+
+fn convert_binary_args(
+    call: &CallExpr,
+    identity: &dyn PrincipalProvider,
+) -> Result<(Resolved, Resolved), CelConvertError> {
+    match call.args.as_slice() {
+        [left, right] => Ok((
+            convert_expr(left, identity)?,
+            convert_expr(right, identity)?,
+        )),
+        _ => Err(CelConvertError::UnsupportedExpression(format!(
+            "operator '{}' expects 2 arguments",
+            call.func_name
+        ))),
+    }
+}
+
 fn convert_relation(
+    op: &str,
     left: Resolved,
-    op: &RelationOp,
     right: Resolved,
 ) -> Result<Resolved, CelConvertError> {
     if let (Resolved::Scalar(ref l), Resolved::Scalar(ref r)) = (&left, &right) {
         let result = match op {
-            RelationOp::Equals => scalar_eq(l, r),
-            RelationOp::NotEquals => scalar_eq(l, r).map(|b| !b),
-            RelationOp::LessThan => scalar_cmp(l, r).map(|o| o == Ordering::Less),
-            RelationOp::LessThanEq => scalar_cmp(l, r).map(|o| o != Ordering::Greater),
-            RelationOp::GreaterThan => scalar_cmp(l, r).map(|o| o == Ordering::Greater),
-            RelationOp::GreaterThanEq => scalar_cmp(l, r).map(|o| o != Ordering::Less),
-            RelationOp::In => None,
+            operators::EQUALS => scalar_eq(l, r),
+            operators::NOT_EQUALS => scalar_eq(l, r).map(|b| !b),
+            operators::LESS => scalar_cmp(l, r).map(|o| o == Ordering::Less),
+            operators::LESS_EQUALS => scalar_cmp(l, r).map(|o| o != Ordering::Greater),
+            operators::GREATER => scalar_cmp(l, r).map(|o| o == Ordering::Greater),
+            operators::GREATER_EQUALS => scalar_cmp(l, r).map(|o| o != Ordering::Less),
+            _ => None,
         };
         if let Some(b) = result {
             return Ok(Resolved::Scalar(ScalarValue::Boolean(Some(b))));
@@ -240,16 +346,16 @@ fn convert_relation(
     let l = resolved_to_expr(left);
     let r = resolved_to_expr(right);
     let expr = match op {
-        RelationOp::Equals => l.eq(r),
-        RelationOp::NotEquals => l.not_eq(r),
-        RelationOp::LessThan => l.lt(r),
-        RelationOp::LessThanEq => l.lt_eq(r),
-        RelationOp::GreaterThan => l.gt(r),
-        RelationOp::GreaterThanEq => l.gt_eq(r),
-        RelationOp::In => {
-            return Err(CelConvertError::UnsupportedExpression(
-                "'in' operator".into(),
-            ));
+        operators::EQUALS => l.eq(r),
+        operators::NOT_EQUALS => l.not_eq(r),
+        operators::LESS => l.lt(r),
+        operators::LESS_EQUALS => l.lt_eq(r),
+        operators::GREATER => l.gt(r),
+        operators::GREATER_EQUALS => l.gt_eq(r),
+        _ => {
+            return Err(CelConvertError::UnsupportedExpression(format!(
+                "relation '{op}'"
+            )))
         }
     };
     Ok(Resolved::DynExpr(expr))
@@ -287,47 +393,51 @@ fn convert_or(left: Resolved, right: Resolved) -> Result<Resolved, CelConvertErr
     }
 }
 
-fn convert_unary(op: &UnaryOp, inner: Resolved) -> Result<Resolved, CelConvertError> {
-    match op {
-        UnaryOp::Not => match inner {
-            Resolved::Scalar(ScalarValue::Boolean(Some(b))) => {
-                Ok(Resolved::Scalar(ScalarValue::Boolean(Some(!b))))
-            }
-            Resolved::DynExpr(e) => Ok(Resolved::DynExpr(not(e))),
-            _ => Err(CelConvertError::UnsupportedExpression(
-                "NOT on non-boolean".into(),
-            )),
-        },
-        UnaryOp::DoubleNot => Ok(inner),
-        UnaryOp::Minus => match inner {
-            Resolved::Scalar(ScalarValue::Int64(Some(v))) => {
-                Ok(Resolved::Scalar(ScalarValue::Int64(Some(-v))))
-            }
-            Resolved::Scalar(ScalarValue::Float64(Some(v))) => {
-                Ok(Resolved::Scalar(ScalarValue::Float64(Some(-v))))
-            }
-            Resolved::DynExpr(e) => Ok(Resolved::DynExpr(Expr::Negative(Box::new(e)))),
-            _ => Err(CelConvertError::UnsupportedExpression(
-                "unary minus on unsupported type".into(),
-            )),
-        },
-        UnaryOp::DoubleMinus => Ok(inner),
+fn convert_not(inner: Resolved) -> Result<Resolved, CelConvertError> {
+    match inner {
+        Resolved::Scalar(ScalarValue::Boolean(Some(b))) => {
+            Ok(Resolved::Scalar(ScalarValue::Boolean(Some(!b))))
+        }
+        Resolved::DynExpr(e) => Ok(Resolved::DynExpr(not(e))),
+        _ => Err(CelConvertError::UnsupportedExpression(
+            "NOT on non-boolean".into(),
+        )),
+    }
+}
+
+fn convert_negate(inner: Resolved) -> Result<Resolved, CelConvertError> {
+    match inner {
+        Resolved::Scalar(ScalarValue::Int64(Some(v))) => {
+            Ok(Resolved::Scalar(ScalarValue::Int64(Some(-v))))
+        }
+        Resolved::Scalar(ScalarValue::Float64(Some(v))) => {
+            Ok(Resolved::Scalar(ScalarValue::Float64(Some(-v))))
+        }
+        Resolved::DynExpr(e) => Ok(Resolved::DynExpr(Expr::Negative(Box::new(e)))),
+        _ => Err(CelConvertError::UnsupportedExpression(
+            "unary minus on unsupported type".into(),
+        )),
     }
 }
 
 fn convert_arithmetic(
+    op: &str,
     left: Resolved,
-    op: &ArithmeticOp,
     right: Resolved,
 ) -> Result<Resolved, CelConvertError> {
     let l = resolved_to_expr(left);
     let r = resolved_to_expr(right);
     let expr = match op {
-        ArithmeticOp::Add => l + r,
-        ArithmeticOp::Subtract => l - r,
-        ArithmeticOp::Multiply => l * r,
-        ArithmeticOp::Divide => l / r,
-        ArithmeticOp::Modulus => l % r,
+        operators::ADD => l + r,
+        operators::SUBSTRACT => l - r,
+        operators::MULTIPLY => l * r,
+        operators::DIVIDE => l / r,
+        operators::MODULO => l % r,
+        _ => {
+            return Err(CelConvertError::UnsupportedExpression(format!(
+                "arithmetic '{op}'"
+            )))
+        }
     };
     Ok(Resolved::DynExpr(expr))
 }

@@ -36,10 +36,10 @@ seed_args=(
 
 if [[ "${storage_template}" == s3://* ]]; then
   seed_args+=(
-    --storage-option "AWS_ENDPOINT_URL=${MINIO_ENDPOINT_URL:-http://minio:9000}"
-    --storage-option "AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}"
-    --storage-option "AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}"
-    --storage-option "AWS_REGION=${MINIO_REGION:-us-east-1}"
+    --storage-option "AWS_ENDPOINT_URL=${RUSTFS_ENDPOINT:-http://rustfs:9000}"
+    --storage-option "AWS_ACCESS_KEY_ID=${RUSTFS_ACCESS_KEY:-rustfsadmin}"
+    --storage-option "AWS_SECRET_ACCESS_KEY=${RUSTFS_SECRET_KEY:-rustfsadmin}"
+    --storage-option "AWS_REGION=${S3_REGION:-us-east-1}"
     --storage-option "AWS_ALLOW_HTTP=true"
   )
 fi

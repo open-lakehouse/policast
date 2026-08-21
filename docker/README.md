@@ -10,7 +10,7 @@ sidecar, and the DataFusion enforcement path.
 |---------|---------|----------|---------|
 | `sidecar` | (default) | long-running | `policast-uc-sidecar` on `:8765`, serving `/policies/resolve` from `examples/uc/store` (defaults to `--backend file`; also supports `--backend uc-bootstrap` — see below) |
 | `datafusion-demo` | `demo` | one-shot | Runs the `run_datafusion_uc_http` example against the sidecar over HTTP |
-| `spark-demo` | `spark` | one-shot | Runs the `RunSpark` example on a Spark 4.1 runtime (Scala 2.13, Java 17); the plugin enforces the compiled manifest via Catalyst rules (no sidecar) |
+| `spark-demo` | `spark` | one-shot | Runs the `RunSpark` example on a Spark 4.2 runtime (Scala 2.13, Java 17); the plugin enforces the compiled manifest via Catalyst rules (no sidecar) |
 | `compile` | `tools` | one-shot | Runs `scripts/compile-policies.sh` to (re)build `examples/policies/manifest.json` |
 | `df-shell` | `shell` | interactive | Rust toolchain + workspace mounted at `/workspace` for ad-hoc `cargo run --example ...` |
 | `playground` | `playground` | long-running | Governed-query policy playground (`policast-playground`) on `:8088` — SPA + `POST /api/query`; `--demo-table` seeds a self-contained patients Delta table so it works with no UC |
@@ -40,7 +40,7 @@ just clean         # tear down + drop named volumes
 See the [Justfile](../Justfile) for the full recipe list (`just`
 with no args lists them).
 
-For the full Unity Catalog + MinIO profile walkthrough (`just uc-full-up`,
+For the full Unity Catalog + RustFS profile walkthrough (`just uc-full-up`,
 `just uc-full-demo`, `just uc-full-down`), see
 [`docs/unity-catalog/compose.md`](../docs/unity-catalog/compose.md).
 
@@ -140,7 +140,7 @@ SQL, and Run: an `analyst` in `us-east` sees only `us-east` rows with `ssn` /
 To test against a real catalog instead, override the command to drop
 `--demo-table` and pass `--uc-endpoint` / `--uc-auth enable`
 `--uc-bearer-token-env UC_TOKEN` (hosted) or `--uc-endpoint http://unitycatalog:8080`
-`--uc-auth disable` plus `--uc-storage-option` entries (local MinIO). The table
+`--uc-auth disable` plus `--uc-storage-option` entries (local RustFS). The table
 must exist in that catalog with a `storage_location` the playground can read.
 
 ## Spark enforcement path
@@ -158,7 +158,7 @@ The `spark-demo` service (Dockerfile targets `spark-build` → `spark-demo`):
 
 1. Assembles the plugin fat jar with `sbt assembly` in a throwaway
    Scala 2.13 / JDK 17 build stage (honors `MAVEN_PROXY_URL`).
-2. Runs on a Spark 4.1 distribution (Scala 2.13, Java 17). Spark 4.x is
+2. Runs on a Spark 4.2 distribution (Scala 2.13, Java 17). Spark 4.x is
    Scala 2.13-only, so the standard `-bin-hadoop3` tarball is used.
 3. `spark-submit`s `com.policast.spark.examples.RunSpark` with
    `spark.plugins` + `spark.sql.extensions` set, pointing
@@ -233,7 +233,7 @@ docker compose run --rm sidecar \
   --listen 0.0.0.0:8765 \
   --backend uc-bootstrap \
   --uc-storage-uri-template s3://policast-demo/governance/policast/{table} \
-  --uc-storage-option AWS_ENDPOINT_URL=http://minio:9000 \
+  --uc-storage-option AWS_ENDPOINT_URL=http://rustfs:9000 \
   --uc-storage-option AWS_ACCESS_KEY_ID=... \
   --uc-storage-option AWS_SECRET_ACCESS_KEY=... \
   --uc-storage-option AWS_REGION=us-east-1 \
@@ -242,7 +242,7 @@ docker compose run --rm sidecar \
   --signing-secret-env POLICAST_UC_SECRET
 ```
 
-What is still pending: a `uc-full` compose profile that adds MinIO
+What is still pending: a `uc-full` compose profile that adds RustFS
 (+ the `policast-demo` bucket), pins
 `newfrontdocker/unitycatalog:v0.4.1`, bootstraps the catalog via an
 init container that runs `examples/uc/ddl/*.sql` + seeds `tags.json`,
@@ -334,7 +334,7 @@ docker build --build-arg RUST_VERSION=1.91 --target sidecar -f docker/Dockerfile
 - **`policast-spark` runs file-based, not sidecar-backed.** The `spark`
   profile (`just spark-demo`) enforces the compiled `manifest.json`
   directly via Catalyst optimizer rules; it does not call the resolver
-  sidecar. The image runs Spark 4.1 (Scala 2.13, Java 17) to match the
+  sidecar. The image runs Spark 4.2 (Scala 2.13, Java 17) to match the
   plugin's build.
 - **The sidecar binary has no `--storage-uri-template` flag** yet, so
   the demo creates its own local Delta table and passes it via

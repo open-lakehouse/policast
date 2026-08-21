@@ -7,7 +7,7 @@
 #   - demo:       runtime image containing the run_datafusion_uc_http example
 #   - shell:      rust toolchain + workspace source, for interactive dev use
 #   - spark-build: Scala 2.13 / sbt stage that assembles the policast-spark jar
-#   - spark-demo:  Spark 4.1 (Scala 2.13, Java 17) runtime that runs RunSpark
+#   - spark-demo:  Spark 4.2 (Scala 2.13, Java 17) runtime that runs RunSpark
 #
 # Build each via:
 #   docker build --target <name> -t policast-<name> -f docker/Dockerfile .
@@ -272,11 +272,11 @@ COPY ${POLICAST_SPARK_JAR_PATH} /build/target/scala-2.13/policast-spark-assembly
 FROM ${SPARK_JAR_STAGE} AS spark-jar
 
 ###############################################
-# 8. Spark demo runtime (Spark 4.1, Scala 2.13, Java 17)
+# 8. Spark demo runtime (Spark 4.2, Scala 2.13, Java 17)
 ###############################################
 FROM eclipse-temurin:17-jre-jammy AS spark-demo
 
-ARG SPARK_VERSION=4.1.2
+ARG SPARK_VERSION=4.2.0
 ENV DEBIAN_FRONTEND=noninteractive \
     SPARK_HOME=/opt/spark \
     PATH=/opt/spark/bin:${PATH}

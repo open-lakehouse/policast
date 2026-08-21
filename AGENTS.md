@@ -48,7 +48,7 @@ Cedar Policy (.cedar)
 | `crates/policast-datafusion/` | Rust | DataFusion `GovernedTable` wrapper, CEL→DataFusion `Expr` compiler, row filters, column masks, optional Delta Lake via `delta` feature |
 | `crates/policast-uc/` | Rust | Unity Catalog REST client, resolver sidecar + owner-aware policy edit API, materialized protobuf PolicyStore (Redis) |
 | `crates/policast-playground/` | Rust | Governed-query playground: serves a SPA + `POST /api/query` that runs Cedar/CEL policies and UC SQL-function UDFs against a UC table via `GovernedTable` |
-| `policast-spark/` | Scala | Spark 4.1 plugin, Catalyst optimizer rules, CEL evaluator (cel-java), not a Cargo workspace member |
+| `policast-spark/` | Scala | Spark 4.2 plugin, Catalyst optimizer rules, CEL evaluator (cel-java), not a Cargo workspace member |
 | `examples/` | Mixed | Cedar policies, sample data (`patients.csv`), DataFusion and Spark demo runners |
 | `scripts/` | Shell | `compile-policies.sh` convenience script |
 | `docs/` | Markdown | Technical documentation (Delta integration, etc.) |
@@ -67,10 +67,10 @@ Use these focused guides when working inside a specific module:
 ### Key dependencies
 
 - **policast-core**: `cedar-policy` (4.x), `serde`, `serde_json`, `clap`, `thiserror`; optional `redis` (`redis` feature) and `prost` (`proto` feature — checked-in `policast.v1` codegen)
-- **policast-datafusion**: `datafusion` (46), `cel-interpreter`, `cel-parser`, optional `deltalake` (0.25)
+- **policast-datafusion**: `datafusion` (53), `cel-interpreter` (0.10), `cel-parser` (0.10), optional `deltalake` (0.32)
 - **policast-uc**: `reqwest` (`client`/UC REST), `axum`/`tower` (`sidecar`), optional `redis` (`redis` feature — materialized protobuf PolicyStore) and `deltalake`/`datafusion` (`uc-bootstrap` — Delta snapshot + owner-aware editor)
 - **policast-playground**: `axum`, `datafusion`, `deltalake` (with `s3`), `policast-datafusion` (`GovernedTable`), `policast-uc` (UC REST + compile)
-- **policast-spark**: Spark 4.1, `cel-java` 0.12, Gson
+- **policast-spark**: Spark 4.2, `cel-java` 0.12, Gson
 
 ## Governance model
 
@@ -114,7 +114,7 @@ The project is designed to produce governance that works across three catalog sy
 - **Testing**: every code change must be accompanied by tests; target ~80% coverage.
 - **Policy files**: Cedar policies live in `examples/policies/`; compiled manifests are JSON.
 - **Feature gates**: Delta Lake support is behind the `delta` Cargo feature in `policast-datafusion`.
-- **CI**: `lint` + `rust` + `spark` run on every PR and are the **required** checks for `main`; the full docker `smoke` is **advisory** and opt-in (push to `main`, nightly, `workflow_dispatch`, or a `run-smoke` PR label). See [`docs/ci.md`](docs/ci.md) for the matrix, artifact reuse, and branch-protection setup.
+- **CI**: `lint` + `rust` + `spark` run on every PR and are the **required** checks for `main`; the full docker `smoke` is **advisory** and opt-in (push to `main`, weekly, `workflow_dispatch`, or a `run-smoke` PR label). See [`docs/ci.md`](docs/ci.md) for the matrix, artifact reuse, and branch-protection setup.
 
 ## Current state
 
