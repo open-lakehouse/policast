@@ -21,6 +21,8 @@ pub struct PrincipalContract {
 /// single portable CEL string (`cel_expression`).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CompiledPolicy {
+    #[prost(string, repeated, tag = "11")]
+    pub binding_selectors: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Stable policy identifier (Cedar @id annotation).
     #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
@@ -60,6 +62,8 @@ pub struct CompiledPolicy {
 /// A versioned manifest of compiled policies. Mirrors `PolicyManifest`.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PolicyManifest {
+    #[prost(string, repeated, tag = "5")]
+    pub row_grant_targets: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Semantic version of the policy set authored by humans (e.g. "1.0").
     /// This is NOT the schema/wire version (see manifest_schema_version).
     #[prost(string, tag = "1")]
@@ -207,6 +211,7 @@ pub enum FilterType {
     RowFilter = 1,
     ColumnMask = 2,
     DenyOverride = 3,
+    RowGrant = 4,
 }
 impl FilterType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -219,6 +224,7 @@ impl FilterType {
             Self::RowFilter => "FILTER_TYPE_ROW_FILTER",
             Self::ColumnMask => "FILTER_TYPE_COLUMN_MASK",
             Self::DenyOverride => "FILTER_TYPE_DENY_OVERRIDE",
+            Self::RowGrant => "FILTER_TYPE_ROW_GRANT",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -228,6 +234,7 @@ impl FilterType {
             "FILTER_TYPE_ROW_FILTER" => Some(Self::RowFilter),
             "FILTER_TYPE_COLUMN_MASK" => Some(Self::ColumnMask),
             "FILTER_TYPE_DENY_OVERRIDE" => Some(Self::DenyOverride),
+            "FILTER_TYPE_ROW_GRANT" => Some(Self::RowGrant),
             _ => None,
         }
     }

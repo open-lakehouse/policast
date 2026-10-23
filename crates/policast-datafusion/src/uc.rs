@@ -106,7 +106,13 @@ pub async fn wrap_bundle(
         .await
         .map_err(|e| UcError::Resolve(format!("table_provider {uri}: {e}")))?;
     let provider: Arc<dyn TableProvider> = Arc::new(table_provider);
-    let identity = identity_from_bundle(&bundle);
+    let mut claims = bundle.identity_claims.clone();
+    if !claims.contains_key("name") {
+        if let Some(id) = claims.get("principal_id").cloned() {
+            claims.insert("name".into(), id);
+        }
+    }
+    let identity = crate::identity::AttrIdentity(claims);
 
     let manifest: PolicyManifest = bundle.compiled_manifest;
     Ok(GovernedTable::new(

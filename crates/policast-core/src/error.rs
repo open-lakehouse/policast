@@ -2,6 +2,10 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum PolicastError {
+    #[error("Authoritative policy resolution required: {0}")]
+    ResolutionRequired(String),
+    #[error("No materialized policy manifest")]
+    CacheMiss,
     #[error("Cedar parse error: {0}")]
     CedarParse(String),
 

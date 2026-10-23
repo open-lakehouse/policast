@@ -43,6 +43,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::error::PolicastError;
+#[cfg(test)]
 use crate::model::CompiledPolicy;
 use crate::policy_manifest::PolicyManifest;
 
@@ -126,23 +127,18 @@ impl FileManifestStore {
 #[async_trait]
 impl PolicyStore for FileManifestStore {
     async fn resolve(&self, query: &PolicyQuery) -> Result<ResolvedPolicies, PolicastError> {
-        let matching: Vec<&CompiledPolicy> = self
-            .manifest
-            .policies
-            .iter()
-            .filter(|p| {
-                table_matches(&p.target_table, &query.table)
-                    && role_applies(p, &query.principal_role)
-            })
-            .collect();
-
-        let bindings_applied: Vec<String> = matching.iter().map(|p| p.id.clone()).collect();
-
-        let manifest = PolicyManifest {
-            version: self.manifest.version.clone(),
-            policies: matching.into_iter().cloned().collect(),
-            principal_contract: self.manifest.principal_contract.clone(),
-        };
+        let mut manifest = self.manifest.clone();
+        manifest.record_grant_targets();
+        let mut matching = Vec::new();
+        for p in manifest.policies {
+            if table_matches(&p.target_table, &query.table)
+                && p.applies_to_identity(&query.principal_role, &query.principal_id, None)?
+            {
+                matching.push(p);
+            }
+        }
+        manifest.policies = matching;
+        let bindings_applied = manifest.policies.iter().map(|p| p.id.clone()).collect();
 
         Ok(ResolvedPolicies {
             manifest,
@@ -181,16 +177,6 @@ pub fn table_matches(pattern: &str, table: &str) -> bool {
         }
     }
     false
-}
-
-/// Returns true if the policy's `applies_to` (if any) includes the
-/// principal's role. A missing `applies_to` means the policy applies to
-/// everyone.
-fn role_applies(policy: &CompiledPolicy, role: &str) -> bool {
-    match &policy.applies_to {
-        None => true,
-        Some(a) => a.roles.is_empty() || a.roles.iter().any(|r| r == role),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -389,7 +375,8 @@ impl<S: PolicyStore, C: ResolvedCache> CachedPolicyStore<S, C> {
     /// or propagate it (strict).
     fn on_cache_error(&self, err: PolicastError) -> Result<(), PolicastError> {
         match self.fail_mode {
-            CacheFailMode::FallBackToInner => Ok(()),
+            CacheFailMode::FallBackToInner if matches!(err, PolicastError::Cache(_)) => Ok(()),
+            CacheFailMode::FallBackToInner => Err(err),
             CacheFailMode::Strict => Err(err),
         }
     }
@@ -484,8 +471,9 @@ impl ResolvedCache for RedisCache {
             .map_err(|e| PolicastError::Cache(format!("redis get: {e}")))?;
         match raw {
             Some(s) => {
-                let value = serde_json::from_str(&s)
-                    .map_err(|e| PolicastError::Cache(format!("redis decode: {e}")))?;
+                let value = serde_json::from_str(&s).map_err(|_| {
+                    PolicastError::Manifest("invalid cached policy manifest".into())
+                })?;
                 Ok(Some(value))
             }
             None => Ok(None),
@@ -520,6 +508,7 @@ mod tests {
 
     fn policy(id: &str, table: &str, roles: Option<Vec<&str>>) -> CompiledPolicy {
         CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: id.into(),
             effect: Effect::Permit,
             filter_type: FilterType::RowFilter,
@@ -538,6 +527,8 @@ mod tests {
 
     fn store_with(policies: Vec<CompiledPolicy>) -> FileManifestStore {
         FileManifestStore::from_manifest(PolicyManifest {
+            manifest_schema_version: 1,
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies,
             principal_contract: None,
@@ -658,6 +649,8 @@ mod tests {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(ResolvedPolicies {
                 manifest: PolicyManifest {
+                    manifest_schema_version: 1,
+                    row_grant_targets: Vec::new(),
                     version: "1.0".into(),
                     policies: vec![policy("p1", "patients", None)],
                     principal_contract: None,
@@ -810,6 +803,8 @@ mod tests {
         let cache = InMemoryCache::new();
         let value = ResolvedPolicies {
             manifest: PolicyManifest {
+                manifest_schema_version: 1,
+                row_grant_targets: Vec::new(),
                 version: "1.0".into(),
                 policies: vec![policy("p1", "patients", None)],
                 principal_contract: None,
@@ -859,6 +854,8 @@ mod tests {
             .with_key_prefix("policast-test:");
         let value = ResolvedPolicies {
             manifest: PolicyManifest {
+                manifest_schema_version: 1,
+                row_grant_targets: Vec::new(),
                 version: "1.0".into(),
                 policies: vec![policy("p1", "patients", None)],
                 principal_contract: None,

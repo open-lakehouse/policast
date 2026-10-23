@@ -28,7 +28,7 @@ use crate::policy_manifest::PolicyManifest;
 
 /// Schema/wire version of the proto contract we emit. Mirrors the
 /// `manifest_schema_version` field; `0`/absent means "v1".
-pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 /// prost-generated message + enum types for `policast.v1`.
 pub mod v1 {
@@ -39,6 +39,8 @@ pub mod v1 {
 /// model (e.g. an enum that arrived as `*_UNSPECIFIED`).
 #[derive(Debug, thiserror::Error)]
 pub enum ProtoError {
+    #[error("unsupported manifest schema version {0}")]
+    UnsupportedSchema(u32),
     #[error("protobuf decode failed: {0}")]
     Decode(#[from] prost::DecodeError),
     #[error("protobuf encode failed: {0}")]
@@ -72,6 +74,7 @@ impl From<&FilterType> for v1::FilterType {
     fn from(f: &FilterType) -> Self {
         match f {
             FilterType::RowFilter => v1::FilterType::RowFilter,
+            FilterType::RowGrant => v1::FilterType::RowGrant,
             FilterType::ColumnMask => v1::FilterType::ColumnMask,
             FilterType::DenyOverride => v1::FilterType::DenyOverride,
         }
@@ -98,6 +101,7 @@ impl From<&PrincipalContract> for v1::PrincipalContract {
 impl From<&CompiledPolicy> for v1::CompiledPolicy {
     fn from(p: &CompiledPolicy) -> Self {
         v1::CompiledPolicy {
+            binding_selectors: p.binding_selectors.clone(),
             id: p.id.clone(),
             effect: v1::Effect::from(&p.effect) as i32,
             filter_type: v1::FilterType::from(&p.filter_type) as i32,
@@ -115,13 +119,14 @@ impl From<&CompiledPolicy> for v1::CompiledPolicy {
 impl From<&PolicyManifest> for v1::PolicyManifest {
     fn from(m: &PolicyManifest) -> Self {
         v1::PolicyManifest {
+            row_grant_targets: m.row_grant_targets.clone(),
             version: m.version.clone(),
             policies: m.policies.iter().map(v1::CompiledPolicy::from).collect(),
             principal_contract: m
                 .principal_contract
                 .as_ref()
                 .map(v1::PrincipalContract::from),
-            manifest_schema_version: MANIFEST_SCHEMA_VERSION,
+            manifest_schema_version: m.manifest_schema_version,
         }
     }
 }
@@ -146,6 +151,7 @@ fn effect_from_proto(value: i32, policy_id: &str) -> Result<Effect, ProtoError> 
 fn filter_type_from_proto(value: i32, policy_id: &str) -> Result<FilterType, ProtoError> {
     match v1::FilterType::try_from(value) {
         Ok(v1::FilterType::RowFilter) => Ok(FilterType::RowFilter),
+        Ok(v1::FilterType::RowGrant) => Ok(FilterType::RowGrant),
         Ok(v1::FilterType::ColumnMask) => Ok(FilterType::ColumnMask),
         Ok(v1::FilterType::DenyOverride) => Ok(FilterType::DenyOverride),
         _ => Err(ProtoError::UnspecifiedEnum {
@@ -180,6 +186,7 @@ impl TryFrom<v1::CompiledPolicy> for CompiledPolicy {
         let effect = effect_from_proto(p.effect, &p.id)?;
         let filter_type = filter_type_from_proto(p.filter_type, &p.id)?;
         Ok(CompiledPolicy {
+            binding_selectors: p.binding_selectors,
             id: p.id,
             effect,
             filter_type,
@@ -198,12 +205,17 @@ impl TryFrom<v1::PolicyManifest> for PolicyManifest {
     type Error = ProtoError;
 
     fn try_from(m: v1::PolicyManifest) -> Result<Self, Self::Error> {
+        if m.manifest_schema_version > MANIFEST_SCHEMA_VERSION {
+            return Err(ProtoError::UnsupportedSchema(m.manifest_schema_version));
+        }
         let policies = m
             .policies
             .into_iter()
             .map(CompiledPolicy::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(PolicyManifest {
+            manifest_schema_version: m.manifest_schema_version.max(1),
+            row_grant_targets: m.row_grant_targets,
             version: m.version,
             policies,
             principal_contract: m.principal_contract.map(PrincipalContract::from),
@@ -236,9 +248,12 @@ mod tests {
 
     fn sample_manifest() -> PolicyManifest {
         PolicyManifest {
+            manifest_schema_version: 1,
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies: vec![
                 CompiledPolicy {
+                    binding_selectors: Vec::new(),
                     id: "row_filter_region".into(),
                     effect: Effect::Permit,
                     filter_type: FilterType::RowFilter,
@@ -254,6 +269,7 @@ mod tests {
                     description: Some("region filter".into()),
                 },
                 CompiledPolicy {
+                    binding_selectors: Vec::new(),
                     id: "mask_ssn".into(),
                     effect: Effect::Forbid,
                     filter_type: FilterType::ColumnMask,
@@ -291,15 +307,17 @@ mod tests {
     #[test]
     fn test_schema_version_is_set_on_encode() {
         let proto = v1::PolicyManifest::from(&sample_manifest());
-        assert_eq!(proto.manifest_schema_version, MANIFEST_SCHEMA_VERSION);
+        assert_eq!(proto.manifest_schema_version, 1);
     }
 
     #[test]
     fn test_unspecified_effect_fails_closed() {
         // Hand-build a proto policy with effect = UNSPECIFIED (0).
         let proto = v1::PolicyManifest {
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies: vec![v1::CompiledPolicy {
+                binding_selectors: Vec::new(),
                 id: "broken".into(),
                 effect: v1::Effect::Unspecified as i32,
                 filter_type: v1::FilterType::RowFilter as i32,
@@ -322,8 +340,10 @@ mod tests {
     #[test]
     fn test_unspecified_filter_type_fails_closed() {
         let proto = v1::PolicyManifest {
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies: vec![v1::CompiledPolicy {
+                binding_selectors: Vec::new(),
                 id: "broken".into(),
                 effect: v1::Effect::Permit as i32,
                 filter_type: v1::FilterType::Unspecified as i32,
@@ -352,8 +372,10 @@ mod tests {
     #[test]
     fn test_unknown_enum_number_fails_closed() {
         let proto = v1::PolicyManifest {
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies: vec![v1::CompiledPolicy {
+                binding_selectors: Vec::new(),
                 id: "future".into(),
                 effect: v1::Effect::Permit as i32,
                 // A filter_type number this build does not know.

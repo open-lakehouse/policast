@@ -64,7 +64,9 @@ pub fn cel_to_datafusion_expr(
     match resolved {
         Resolved::Scalar(ScalarValue::Boolean(Some(true))) => Ok(None),
         Resolved::Scalar(ScalarValue::Boolean(Some(false))) => Ok(Some(lit(false))),
-        Resolved::Scalar(_) => Ok(None),
+        Resolved::Scalar(_) => Err(CelConvertError::UnsupportedExpression(
+            "policy predicate must be boolean".into(),
+        )),
         Resolved::DynExpr(expr) => Ok(Some(expr)),
     }
 }
@@ -101,6 +103,8 @@ pub fn cel_to_bool(
     resource_table: &str,
 ) -> Result<bool, CelConvertError> {
     use cel_interpreter::{Context, Program, Value};
+    // Validate every branch against the same supported subset as row policies.
+    convert_expr(&parse_cel(cel)?, identity)?;
 
     // Same fail-safe rationale as `parse_cel`: `Program::compile` runs the same
     // ANTLR-based parser, which can panic on malformed input. Trap it so a bad
@@ -134,8 +138,12 @@ pub fn cel_to_bool(
 
     match program.execute(&ctx) {
         Ok(Value::Bool(b)) => Ok(b),
-        Ok(_) => Ok(false),
-        Err(_) => Ok(true),
+        Ok(_) => Err(CelConvertError::UnsupportedExpression(
+            "mask predicate must be boolean".into(),
+        )),
+        Err(_) => Err(CelConvertError::UnsupportedExpression(
+            "mask evaluation failed".into(),
+        )),
     }
 }
 

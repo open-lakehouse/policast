@@ -13,6 +13,15 @@ use crate::profile::{
 /// A versioned manifest of compiled policies, portable as JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyManifest {
+    #[serde(
+        default = "legacy_schema",
+        deserialize_with = "read_schema",
+        skip_serializing_if = "is_legacy_schema"
+    )]
+    pub manifest_schema_version: u32,
+    /// Table selectors requiring a grant, preserved when principal filtering removes grants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub row_grant_targets: Vec<String>,
     pub version: String,
     pub policies: Vec<CompiledPolicy>,
     /// Compile-time footprint of the `principal.*` attributes referenced
@@ -26,6 +35,8 @@ pub struct PolicyManifest {
 impl PolicyManifest {
     pub fn new() -> Self {
         Self {
+            manifest_schema_version: 1,
+            row_grant_targets: Vec::new(),
             version: "1.0".to_string(),
             policies: Vec::new(),
             principal_contract: None,
@@ -44,6 +55,14 @@ impl PolicyManifest {
 
         for policy in parsed {
             let compiled = compile_single_policy(policy)?;
+            if compiled.filter_type == FilterType::RowGrant {
+                self.manifest_schema_version = 2;
+                if !compiled.is_tag_scoped() {
+                    self.row_grant_targets.push(compiled.target_table.clone());
+                    self.row_grant_targets.sort();
+                    self.row_grant_targets.dedup();
+                }
+            }
             for cond in &policy.conditions {
                 principal_attrs.extend(collect_principal_attrs(&cond.body));
             }
@@ -95,6 +114,51 @@ impl PolicyManifest {
             .filter(|p| crate::policy_store::table_matches(&p.target_table, table))
             .collect()
     }
+
+    pub fn requires_grant(&self, table: &str) -> bool {
+        self.row_grant_targets
+            .iter()
+            .any(|t| crate::policy_store::table_matches(t, table))
+            || self
+                .policies_for_table(table)
+                .iter()
+                .any(|p| p.filter_type == FilterType::RowGrant)
+    }
+
+    /// Record grant requirements before discarding ineligible policies.
+    pub fn record_grant_targets(&mut self) {
+        for p in &self.policies {
+            if p.filter_type == FilterType::RowGrant && !p.is_tag_scoped() {
+                self.row_grant_targets.push(p.target_table.clone());
+            }
+        }
+        self.row_grant_targets.sort();
+        self.row_grant_targets.dedup();
+        if !self.row_grant_targets.is_empty()
+            || self
+                .policies
+                .iter()
+                .any(|p| !p.binding_selectors.is_empty())
+        {
+            self.manifest_schema_version = 2;
+        }
+    }
+}
+
+fn legacy_schema() -> u32 {
+    1
+}
+fn is_legacy_schema(v: &u32) -> bool {
+    *v == 1
+}
+fn read_schema<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    match u32::deserialize(d)? {
+        0 | 1 => Ok(1),
+        2 => Ok(2),
+        _ => Err(serde::de::Error::custom(
+            "unsupported manifest schema version",
+        )),
+    }
 }
 
 impl Default for PolicyManifest {
@@ -114,11 +178,16 @@ fn compile_single_policy(policy: &ParsedPolicy) -> Result<CompiledPolicy, Polica
         .annotations
         .get("filter_type")
         .map(|ft| match ft.as_str() {
-            "row_filter" => FilterType::RowFilter,
-            "column_mask" => FilterType::ColumnMask,
-            "deny_override" => FilterType::DenyOverride,
-            _ => FilterType::RowFilter,
+            "row_filter" => Ok(FilterType::RowFilter),
+            "row_grant" => Ok(FilterType::RowGrant),
+            "column_mask" => Ok(FilterType::ColumnMask),
+            "deny_override" => Ok(FilterType::DenyOverride),
+            _ => Err(PolicastError::Manifest(format!(
+                "policy {}: unknown filter_type",
+                policy.id
+            ))),
         })
+        .transpose()?
         .unwrap_or_else(|| {
             if effect == Effect::Forbid {
                 FilterType::DenyOverride
@@ -230,6 +299,7 @@ fn compile_single_policy(policy: &ParsedPolicy) -> Result<CompiledPolicy, Polica
     });
 
     Ok(CompiledPolicy {
+        binding_selectors: Vec::new(),
         id: policy.id.clone(),
         effect,
         filter_type,
@@ -632,5 +702,96 @@ mod tests {
         let reloaded = PolicyManifest::from_json(&json).unwrap();
         assert_eq!(reloaded.policies.len(), 1);
         assert_eq!(reloaded.policies[0].id, "roundtrip_test");
+    }
+    #[test]
+    fn row_grant_scaffold_and_schema_roundtrip() {
+        let cedar = crate::scaffold::render_scaffold(&crate::scaffold::ScaffoldOptions {
+            profile_kind: Some(PolicyProfile::RowGrant),
+            target_table: Some("patients".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut manifest = PolicyManifest::new();
+        manifest
+            .compile_policies(&parse_policies(&cedar).unwrap())
+            .unwrap();
+        assert_eq!(manifest.policies[0].filter_type, FilterType::RowGrant);
+        assert_eq!(manifest.manifest_schema_version, 2);
+        assert_eq!(manifest.row_grant_targets, vec!["patients"]);
+        assert_eq!(
+            PolicyManifest::from_json(&manifest.to_json().unwrap()).unwrap(),
+            manifest
+        );
+        #[cfg(feature = "proto")]
+        assert_eq!(
+            PolicyManifest::from_protobuf(&manifest.to_protobuf()).unwrap(),
+            manifest
+        );
+        assert!(crate::scaffold::parse_profile_kind("row-grant").is_ok());
+        assert!(parse_policies(&cedar.replace("permit (", "forbid ("))
+            .and_then(|p| PolicyManifest::new().compile_policies(&p))
+            .is_err());
+    }
+
+    #[test]
+    fn unknown_schema_and_policy_kind_are_rejected() {
+        assert!(PolicyManifest::from_json(
+            r#"{"version":"1.0","policies":[],"manifest_schema_version":3}"#
+        )
+        .is_err());
+        let cedar = r#"@filter_type("typo") permit(principal, action, resource);"#;
+        assert!(PolicyManifest::new()
+            .compile_policies(&parse_policies(cedar).unwrap())
+            .is_err());
+        assert_eq!(
+            PolicyManifest::from_json(r#"{"version":"1.0","policies":[]}"#)
+                .unwrap()
+                .manifest_schema_version,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn principal_selection_preserves_grant_requirement_and_bindings() {
+        use crate::policy_store::{FileManifestStore, PolicyQuery, PolicyStore};
+        let mut manifest = PolicyManifest::new();
+        manifest
+            .compile_policies(
+                &parse_policies(
+                    r#"
+            @filter_type("row_grant") @target_table("patients") @roles("admin")
+            permit(principal, action, resource);
+        "#,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        manifest.policies[0].binding_selectors =
+            vec!["principal:bob".into(), "group:clinical".into()];
+        let policy = &manifest.policies[0];
+        assert!(!policy
+            .applies_to_identity("analyst", "bob", Some("clinical"))
+            .unwrap());
+        assert!(policy.applies_to_identity("admin", "bob", None).unwrap());
+        assert!(policy.applies_to_identity("admin", "alice", None).is_err());
+        assert!(policy
+            .applies_to_identity("admin", "alice", Some("finance, clinical"))
+            .unwrap());
+        let resolved = FileManifestStore::from_manifest(manifest)
+            .resolve(&PolicyQuery {
+                table: "patients".into(),
+                principal_id: "alice".into(),
+                principal_role: "analyst".into(),
+            })
+            .await
+            .unwrap();
+        assert!(resolved.manifest.policies.is_empty());
+        assert!(resolved.manifest.requires_grant("patients"));
+        #[cfg(feature = "proto")]
+        assert!(
+            PolicyManifest::from_protobuf(&resolved.manifest.to_protobuf())
+                .unwrap()
+                .requires_grant("patients")
+        );
     }
 }

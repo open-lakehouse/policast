@@ -48,10 +48,14 @@ enum Commands {
     },
 
     /// Scaffold a new Cedar policy from one of the opinionated profiles
-    /// (row-filter, column-mask, deny-override).
+    /// (row-filter, row-grant, column-mask, deny-override).
     New {
-        /// Profile to scaffold: row-filter | column-mask | deny-override.
-        profile: String,
+        /// Legacy positional profile name (or use --kind).
+        #[arg(required_unless_present = "kind", conflicts_with = "kind")]
+        profile: Option<String>,
+        /// Profile: row-filter | row-grant | column-mask | deny-override.
+        #[arg(long)]
+        kind: Option<String>,
         /// `@id` annotation for the policy.
         #[arg(long)]
         id: Option<String>,
@@ -67,7 +71,7 @@ enum Commands {
         /// Column tag to mask (column-mask only, `@applies_to_tag`).
         #[arg(long)]
         tag: Option<String>,
-        /// Roles: `@roles` for row-filter, exemption list for masks/denies.
+        /// Roles: `@roles` for row-filter/row-grant, exemption list for masks/denies.
         #[arg(long)]
         role: Vec<String>,
         /// `@description` annotation.
@@ -203,6 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (
             Some(Commands::New {
                 profile,
+                kind,
                 id,
                 table,
                 target_tag,
@@ -214,7 +219,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }),
             _,
         ) => run_new(
-            profile,
+            profile
+                .as_deref()
+                .or(kind.as_deref())
+                .expect("clap requires a profile"),
             id.clone(),
             table.clone(),
             target_tag.clone(),
@@ -517,6 +525,7 @@ fn compiled_to_row(p: &CompiledPolicy, version: i64) -> PolicyRow {
         policy_id: p.id.clone(),
         filter_type: match p.filter_type {
             FilterType::RowFilter => "row_filter",
+            FilterType::RowGrant => "row_grant",
             FilterType::ColumnMask => "column_mask",
             FilterType::DenyOverride => "deny_override",
         }
@@ -585,6 +594,7 @@ mod tests {
 
     fn sample_policy(id: &str) -> CompiledPolicy {
         CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: id.into(),
             effect: Effect::Permit,
             filter_type: FilterType::RowFilter,
@@ -709,6 +719,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let manifest_path = dir.path().join("manifest.json");
         let manifest = PolicyManifest {
+            manifest_schema_version: 1,
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies: vec![],
             principal_contract: Some(PrincipalContract {
@@ -755,5 +767,25 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         let overlay: PropertiesOverlay = serde_json::from_str(&text).unwrap();
         assert_eq!(overlay.properties["policast.applied_policies"], "p1,p2");
+    }
+    #[test]
+    fn new_accepts_kind_and_legacy_positional_profiles() {
+        for args in [
+            vec![
+                "policast",
+                "new",
+                "--kind",
+                "row-grant",
+                "--table",
+                "patients",
+            ],
+            vec!["policast", "new", "row-grant", "--table", "patients"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+        assert!(Cli::try_parse_from(["policast", "new"]).is_err());
+        assert!(
+            Cli::try_parse_from(["policast", "new", "row-filter", "--kind", "row-grant"]).is_err()
+        );
     }
 }

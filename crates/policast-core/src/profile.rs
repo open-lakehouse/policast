@@ -29,6 +29,7 @@ pub const CANONICAL_PRINCIPAL_ATTRS: &[&str] = &["role", "region", "name", "grou
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyProfile {
     RowFilter,
+    RowGrant,
     ColumnMask,
     DenyOverride,
 }
@@ -38,6 +39,7 @@ impl PolicyProfile {
     pub fn from_filter_type(ft: &FilterType) -> Self {
         match ft {
             FilterType::RowFilter => PolicyProfile::RowFilter,
+            FilterType::RowGrant => PolicyProfile::RowGrant,
             FilterType::ColumnMask => PolicyProfile::ColumnMask,
             FilterType::DenyOverride => PolicyProfile::DenyOverride,
         }
@@ -46,6 +48,7 @@ impl PolicyProfile {
     pub fn as_str(&self) -> &'static str {
         match self {
             PolicyProfile::RowFilter => "row_filter",
+            PolicyProfile::RowGrant => "row_grant",
             PolicyProfile::ColumnMask => "column_mask",
             PolicyProfile::DenyOverride => "deny_override",
         }
@@ -70,7 +73,7 @@ pub fn validate_profile(
     let mut warnings = Vec::new();
 
     match profile {
-        PolicyProfile::RowFilter => {
+        PolicyProfile::RowFilter | PolicyProfile::RowGrant => {
             if effect != Effect::Permit {
                 return Err(profile_err(
                     policy_id,

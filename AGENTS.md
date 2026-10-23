@@ -74,10 +74,11 @@ Use these focused guides when working inside a specific module:
 
 ## Governance model
 
-Three policy types are supported, all authored in Cedar and compiled to CEL:
+Four policy types are supported, all authored in Cedar and compiled to CEL:
 
 | Type | Cedar effect | Enforcement |
 |------|-------------|-------------|
+| **Row grant** | `permit` with `@filter_type("row_grant")` | OR-combined alternatives, ANDed with mandatory row filters |
 | **Row filter** | `permit` with `when` clause referencing `resource.*` and `principal.*` | `FilterExec` wrapping the inner scan |
 | **Column mask** | `permit` with condition on `principal.role` | `ProjectionExec` replacing column values with `"***"` |
 | **Deny override** | `forbid` with `when`/`unless` | Inverted row filter — keeps rows where deny condition is false; exempt users get the filter constant-folded away |

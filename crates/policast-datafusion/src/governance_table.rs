@@ -71,7 +71,7 @@ impl GovernedTable {
     }
 
     /// Returns the list of (column, mask_value) pairs that should be applied.
-    pub fn masked_columns(&self) -> Vec<(String, String)> {
+    pub fn masked_columns(&self) -> DFResult<Vec<(String, String)>> {
         build_column_masks(&self.manifest, &self.table_name, self.identity.as_ref())
     }
 }
@@ -100,14 +100,18 @@ impl TableProvider for GovernedTable {
         &self,
         filters: &[&Expr],
     ) -> DFResult<Vec<TableProviderFilterPushDown>> {
-        self.inner.supports_filters_pushdown(filters)
+        // User predicates must observe masked values, not the raw scan.
+        Ok(vec![
+            TableProviderFilterPushDown::Unsupported;
+            filters.len()
+        ])
     }
     async fn scan(
         &self,
         state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
-        limit: Option<usize>,
+        _limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
         let governance_filters =
             build_row_filters(&self.manifest, &self.table_name, self.identity.as_ref())?;
@@ -115,16 +119,28 @@ impl TableProvider for GovernedTable {
         // Pass user-provided filters to the inner provider (it can push them
         // down if it supports them). Governance filters are applied as a
         // FilterExec wrapper so they are always enforced.
-        let inner_plan = self.inner.scan(state, projection, filters, limit).await?;
+        let inner_plan = self.inner.scan(state, None, filters, None).await?;
 
         let plan = apply_governance_filters(state, inner_plan, &governance_filters)?;
 
-        let masks = build_column_masks(&self.manifest, &self.table_name, self.identity.as_ref());
-        if masks.is_empty() {
-            return Ok(plan);
+        let masks = self.masked_columns()?;
+        let plan = apply_column_masks(plan, &masks)?;
+        // Restore the requested shape only after governance has seen all columns.
+        if let Some(indices) = projection {
+            let schema = plan.schema();
+            let exprs = indices
+                .iter()
+                .map(|&i| {
+                    let name = schema.field(i).name().clone();
+                    (
+                        Arc::new(Column::new(&name, i)) as Arc<dyn PhysicalExpr>,
+                        name,
+                    )
+                })
+                .collect::<Vec<_>>();
+            return Ok(Arc::new(ProjectionExec::try_new(exprs, plan)?));
         }
-
-        apply_column_masks(plan, &masks)
+        Ok(plan)
     }
 }
 
@@ -150,7 +166,13 @@ fn apply_governance_filters(
 
     let mut current = plan;
     for filter_expr in filters {
-        let physical_expr = state.create_physical_expr(filter_expr.clone(), &df_schema)?;
+        let physical_expr = state
+            .create_physical_expr(filter_expr.clone(), &df_schema)
+            .map_err(|_| {
+                datafusion::common::DataFusionError::Plan(
+                    "invalid governance predicate (missing column or incompatible types)".into(),
+                )
+            })?;
         current = Arc::new(FilterExec::try_new(physical_expr, current)?);
     }
 
@@ -164,6 +186,21 @@ fn apply_column_masks(
     masks: &[(String, String)],
 ) -> DFResult<Arc<dyn ExecutionPlan>> {
     let schema = plan.schema();
+    for (column, _) in masks {
+        let field = schema.field_with_name(column).map_err(|_| {
+            datafusion::common::DataFusionError::Plan(format!(
+                "mask column {column} does not exist"
+            ))
+        })?;
+        if !matches!(
+            field.data_type(),
+            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
+        ) {
+            return Err(datafusion::common::DataFusionError::Plan(format!(
+                "mask column {column} must be a string"
+            )));
+        }
+    }
     let masked_names: HashSet<&str> = masks.iter().map(|(col, _)| col.as_str()).collect();
     let mask_values: std::collections::HashMap<&str, &str> = masks
         .iter()
@@ -177,12 +214,16 @@ fn apply_column_masks(
         if masked_names.contains(name.as_str()) {
             let mask_val = mask_values[name.as_str()];
             let lit_expr: Arc<dyn PhysicalExpr> = match field.data_type() {
-                DataType::Utf8 | DataType::LargeUtf8 => Arc::new(Literal::new(
-                    datafusion::common::ScalarValue::Utf8(Some(mask_val.to_string())),
+                DataType::Utf8 => Arc::new(Literal::new(datafusion::common::ScalarValue::Utf8(
+                    Some(mask_val.to_string()),
+                ))),
+                DataType::LargeUtf8 => Arc::new(Literal::new(
+                    datafusion::common::ScalarValue::LargeUtf8(Some(mask_val.to_string())),
                 )),
-                _ => Arc::new(Literal::new(datafusion::common::ScalarValue::Utf8(Some(
-                    mask_val.to_string(),
-                )))),
+                DataType::Utf8View => Arc::new(Literal::new(
+                    datafusion::common::ScalarValue::Utf8View(Some(mask_val.to_string())),
+                )),
+                _ => unreachable!("validated above"),
             };
             projection_exprs.push((lit_expr, name));
         } else {
@@ -204,8 +245,11 @@ mod tests {
 
     fn _test_manifest() -> PolicyManifest {
         PolicyManifest {
+            manifest_schema_version: 1,
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies: vec![CompiledPolicy {
+                binding_selectors: Vec::new(),
                 id: "test_row_filter".into(),
                 effect: Effect::Permit,
                 filter_type: FilterType::RowFilter,
@@ -224,8 +268,11 @@ mod tests {
     #[test]
     fn test_masked_columns_analyst() {
         let manifest = PolicyManifest {
+            manifest_schema_version: 1,
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies: vec![CompiledPolicy {
+                binding_selectors: Vec::new(),
                 id: "mask_ssn".into(),
                 effect: Effect::Forbid,
                 filter_type: FilterType::ColumnMask,
@@ -247,7 +294,7 @@ mod tests {
             name: None,
         };
         let governed = GovernedTable::new(Arc::new(DummyProvider), manifest, "patients", identity);
-        let masks = governed.masked_columns();
+        let masks = governed.masked_columns().unwrap();
         assert_eq!(masks.len(), 1);
         assert_eq!(masks[0].0, "ssn");
     }
@@ -257,8 +304,11 @@ mod tests {
     #[test]
     fn test_masked_columns_with_attr_identity() {
         let manifest = PolicyManifest {
+            manifest_schema_version: 1,
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies: vec![CompiledPolicy {
+                binding_selectors: Vec::new(),
                 id: "mask_ssn".into(),
                 effect: Effect::Forbid,
                 filter_type: FilterType::ColumnMask,
@@ -277,9 +327,25 @@ mod tests {
         let identity = AttrIdentity::new().with("role", "admin");
         let governed = GovernedTable::new(Arc::new(DummyProvider), manifest, "patients", identity);
         assert!(
-            governed.masked_columns().is_empty(),
+            governed.masked_columns().unwrap().is_empty(),
             "admin (via AttrIdentity) should not be masked"
         );
+    }
+
+    #[test]
+    fn masks_preserve_string_layouts_and_reject_invalid_targets() {
+        use datafusion::arrow::datatypes::{Field, Schema};
+        use datafusion::physical_plan::empty::EmptyExec;
+        for dtype in [DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View] {
+            let schema = Arc::new(Schema::new(vec![Field::new("ssn", dtype.clone(), true)]));
+            let plan = Arc::new(EmptyExec::new(schema));
+            let masked = apply_column_masks(plan, &[("ssn".into(), "***".into())]).unwrap();
+            assert_eq!(masked.schema().field(0).data_type(), &dtype);
+        }
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let plan = Arc::new(EmptyExec::new(schema));
+        assert!(apply_column_masks(plan.clone(), &[("id".into(), "***".into())]).is_err());
+        assert!(apply_column_masks(plan, &[("absent".into(), "***".into())]).is_err());
     }
 
     struct DummyProvider;

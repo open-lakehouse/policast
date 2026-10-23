@@ -13,6 +13,7 @@ pub enum Effect {
 #[serde(rename_all = "snake_case")]
 pub enum FilterType {
     RowFilter,
+    RowGrant,
     ColumnMask,
     DenyOverride,
 }
@@ -57,6 +58,9 @@ impl PrincipalContract {
 /// the engines themselves never interpret tag fields.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledPolicy {
+    /// Alternative UC binding selectors; empty means unrestricted by binding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub binding_selectors: Vec<String>,
     pub id: String,
     pub effect: Effect,
     pub filter_type: FilterType,
@@ -87,6 +91,54 @@ pub struct CompiledPolicy {
 }
 
 impl CompiledPolicy {
+    /// Binding alternatives are OR; policy role and principal constraints are AND.
+    /// Missing group claims request authoritative resolution, never broaden access.
+    pub fn applies_to_identity(
+        &self,
+        role: &str,
+        principal: &str,
+        groups: Option<&str>,
+    ) -> Result<bool, crate::error::PolicastError> {
+        use crate::error::PolicastError;
+        if let Some(a) = &self.applies_to {
+            if (!a.roles.is_empty() && !a.roles.iter().any(|r| r == role))
+                || (!a.principals.is_empty() && !a.principals.iter().any(|p| p == principal))
+            {
+                return Ok(false);
+            }
+        }
+        let mut matches = self.binding_selectors.is_empty();
+        let mut needs_groups = false;
+        for sel in &self.binding_selectors {
+            matches |= if sel == "*" {
+                true
+            } else if let Some(r) = sel.strip_prefix("role:") {
+                r == role
+            } else if let Some(p) = sel.strip_prefix("principal:") {
+                p == principal
+            } else if let Some(g) = sel.strip_prefix("group:") {
+                if let Some(gs) = groups {
+                    gs.split(',').any(|v| v.trim() == g)
+                } else {
+                    needs_groups = true;
+                    false
+                }
+            } else {
+                return Err(PolicastError::Manifest(format!(
+                    "policy {}: unknown binding selector",
+                    self.id
+                )));
+            };
+        }
+        if !matches && needs_groups {
+            return Err(PolicastError::ResolutionRequired(format!(
+                "policy {} requires group claims",
+                self.id
+            )));
+        }
+        Ok(matches)
+    }
+
     /// Returns true when this policy needs resolver-side expansion
     /// (i.e. either `target_tag` or `applies_to_tag` is set).
     pub fn is_tag_scoped(&self) -> bool {

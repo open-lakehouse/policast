@@ -82,6 +82,17 @@ See [`research/unity-catalog-policy-store.md`](research/unity-catalog-policy-sto
 for the full design and [`docs/unity-catalog/overview.md`](docs/unity-catalog/overview.md)
 for usage.
 
+## Policy composition
+
+Use `row_grant` policies for OR-combined access alternatives and existing
+`row_filter` policies for AND-combined mandatory restrictions. Deny overrides
+always win, and grants never bypass column masks. Both DataFusion and Spark
+enforce the same composition contract.
+
+Scaffold a grant with `policast new --kind row-grant --table patients`.
+See [policy composition](docs/policy-composition.md) for compatibility and rollout
+details, and [the Cedar example](examples/composition.cedar).
+
 ## POC: Healthcare Data Governance
 
 The proof-of-concept demonstrates three governance patterns on a `patients` table:

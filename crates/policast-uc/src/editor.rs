@@ -302,6 +302,7 @@ pub fn manifest_schema() -> Arc<Schema> {
 fn filter_type_str(ft: &FilterType) -> &'static str {
     match ft {
         FilterType::RowFilter => "row_filter",
+        FilterType::RowGrant => "row_grant",
         FilterType::ColumnMask => "column_mask",
         FilterType::DenyOverride => "deny_override",
     }
