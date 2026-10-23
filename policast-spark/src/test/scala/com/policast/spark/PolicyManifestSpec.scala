@@ -86,4 +86,28 @@ class PolicyManifestSpec extends AnyFunSuite with Matchers {
     val manifest = PolicyManifest.fromJson(json)
     manifest.requiredPrincipalAttributes shouldBe Seq("region", "role")
   }
+  test("schema versions and unknown policy kinds are validated") {
+    intercept[IllegalArgumentException] {
+      PolicyManifest.fromJson("""{"version":"1.0","policies":[],"manifest_schema_version":3}""")
+    }
+    intercept[IllegalArgumentException] {
+      PolicyManifest.fromJson("""{"version":"1.0","policies":[{"id":"bad","effect":"permit","filter_type":"typo","target_table":"patients","cel_expression":"true"}]}""")
+    }
+  }
+
+  test("an empty eligible policy set retains the table's grant requirement") {
+    val m = PolicyManifest.fromJson("""{"version":"1.0","manifest_schema_version":2,"row_grant_targets":["patients"],"policies":[]}""")
+    m.requiresGrant("default.patients") shouldBe true
+    PolicyManifest.fromJson(m.toJson).requiresGrant("patients") shouldBe true
+    m.requiresGrant("orders") shouldBe false
+  }
+
+  test("schema wildcards and bare/qualified names match the Rust contract") {
+    PolicyManifest.tableMatches("hospital.clinical.*", "hospital.clinical.patients") shouldBe true
+    PolicyManifest.tableMatches("patients", "hospital.clinical.patients") shouldBe true
+    PolicyManifest.tableMatches("hospital.clinical.patients", "patients") shouldBe true
+    PolicyManifest.tableMatches("hospital.other.*", "hospital.clinical.patients") shouldBe false
+    PolicyManifest.tableMatches("one.schema.patients", "two.schema.patients") shouldBe false
+  }
+
 }

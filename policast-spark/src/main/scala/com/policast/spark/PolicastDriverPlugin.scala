@@ -19,22 +19,12 @@ class PolicastDriverPlugin extends DriverPlugin {
       sc: SparkContext,
       pluginContext: PluginContext
   ): JMap[String, String] = {
-    val manifestPath = sc.getConf.get(
-      "spark.policast.manifest.path",
-      "policies/manifest.json"
-    )
-
-    try {
-      val manifest = PolicyManifest.load(manifestPath)
+    sc.getConf.getOption("spark.policast.manifest.path").filter(_.nonEmpty).foreach { path =>
+      val manifest = PolicyManifest.load(path)
       val json = manifest.toJson
       sc.setLocalProperty(PolicastDriverPlugin.ManifestKey, json)
       sc.getConf.set(PolicastDriverPlugin.ManifestKey, json)
-
-      val count = manifest.policies.size()
-      logInfo(s"Policast: loaded $count policies from $manifestPath")
-    } catch {
-      case e: Exception =>
-        logWarning(s"Policast: failed to load manifest from $manifestPath: ${e.getMessage}")
+      logInfo(s"Policast: loaded ${manifest.policies.size()} policies from $path")
     }
 
     Collections.emptyMap()
