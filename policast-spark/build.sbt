@@ -48,6 +48,8 @@ libraryDependencies ++= Seq(
 // test JVM with the same opens, and keep the single SparkSession serialized.
 Test / fork := true
 Test / parallelExecution := false
+// One set of engine-neutral fixtures, shared with the Rust conformance suite.
+Test / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "tests" / "fixtures"
 Test / javaOptions ++= Seq(
   "-Xmx2g",
   "-XX:+IgnoreUnrecognizedVMOptions",

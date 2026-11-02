@@ -109,4 +109,26 @@ class CelEvaluatorSpec extends AnyFunSuite with Matchers {
     val identity = QueryIdentity("admin", None, None, Map.empty)
     evaluator.shouldMask(cel, identity) shouldBe false
   }
+  test("structural translation handles arbitrary columns, OR, AND, arithmetic and negation") {
+    val bindings = new java.util.HashMap[String, Any]()
+    bindings.put("resource_patient_id", 3)
+    bindings.put("resource_name", "Alice")
+    bindings.put("principal_name", "Alice")
+    evaluator.evaluate("""(resource.patient_id + 2) % 2 == 1 && (resource.name == principal.name || false)""", bindings) shouldBe true
+    evaluator.evaluate("""!(resource.patient_id < 3) && resource.patient_id / 2 == 1""", bindings) shouldBe true
+  }
+
+  test("principal-looking string literals are not rewritten or collected as references") {
+    evaluator.evaluate(""""principal.role" == "principal.role"""", new java.util.HashMap[String, Any]()) shouldBe true
+    CelEvaluator.principalAttrsIn(""""principal.role" == "principal.region"""") shouldBe Set.empty
+  }
+
+  test("applicable unsupported, missing, malformed and nonboolean predicates reject") {
+    val identity = QueryIdentity("analyst", None, None)
+    for (cel <- Seq("42", "resource.name ==", "principal.missing == 'x'", "true || principal.missing == 'x'", "resource.name.startsWith('A')")) {
+      intercept[Exception] { evaluator.celToSparkExpr(cel, Seq.empty, identity) }
+    }
+    intercept[Exception] { evaluator.shouldMask("principal.missing == 'x'", identity) }
+  }
+
 }
