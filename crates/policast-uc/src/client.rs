@@ -187,6 +187,8 @@ impl PolicyStore for UnityCatalogPolicyStore {
 pub fn bundle_to_resolved(bundle: ResolveBundle) -> ResolvedPolicies {
     ResolvedPolicies {
         manifest: PolicyManifest {
+            manifest_schema_version: 1,
+            row_grant_targets: Vec::new(),
             version: bundle.compiled_manifest.version,
             policies: bundle.compiled_manifest.policies,
             principal_contract: bundle.compiled_manifest.principal_contract,

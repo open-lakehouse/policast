@@ -17,7 +17,6 @@
 use async_trait::async_trait;
 use redis::AsyncCommands;
 
-use policast_core::model::CompiledPolicy;
 use policast_core::policy_store::{PolicyQuery, PolicyStore, ResolvedPolicies};
 use policast_core::{PolicastError, PolicyManifest};
 
@@ -94,8 +93,9 @@ impl RedisManifestStore {
             .map_err(|e| UcError::Config(format!("redis get {table}: {e}")))?;
         match raw {
             Some(bytes) => {
-                let manifest = PolicyManifest::from_protobuf(&bytes)
-                    .map_err(|e| UcError::Config(format!("redis decode {table}: {e}")))?;
+                let manifest = PolicyManifest::from_protobuf(&bytes).map_err(|_| {
+                    UcError::Invalid(format!("invalid Redis policy manifest for {table}"))
+                })?;
                 Ok(Some(manifest))
             }
             None => Ok(None),
@@ -120,44 +120,29 @@ impl RedisManifestStore {
     }
 }
 
-/// Returns true if the policy applies to `role` (a missing/empty
-/// `applies_to` means "everyone"). Mirrors the core's serving semantics.
-fn role_applies(policy: &CompiledPolicy, role: &str) -> bool {
-    match &policy.applies_to {
-        None => true,
-        Some(a) => a.roles.is_empty() || a.roles.iter().any(|r| r == role),
-    }
-}
-
 #[async_trait]
 impl PolicyStore for RedisManifestStore {
     async fn resolve(&self, query: &PolicyQuery) -> Result<ResolvedPolicies, PolicastError> {
-        let manifest = self
+        let mut manifest = self
             .get_manifest(&query.table)
             .await
-            .map_err(|e| PolicastError::Cache(e.to_string()))?
-            .ok_or_else(|| {
-                PolicastError::Manifest(format!(
-                    "no materialized manifest for table `{}`",
-                    query.table
-                ))
-            })?;
-
-        // The per-table manifest is already scoped to the table; apply
-        // the role filter to mirror FileManifestStore semantics.
-        let matching: Vec<CompiledPolicy> = manifest
-            .policies
-            .into_iter()
-            .filter(|p| role_applies(p, &query.principal_role))
-            .collect();
-        let bindings_applied = matching.iter().map(|p| p.id.clone()).collect();
+            .map_err(|e| match e {
+                UcError::Invalid(_) => PolicastError::Manifest(e.to_string()),
+                _ => PolicastError::Cache(e.to_string()),
+            })?
+            .ok_or(PolicastError::CacheMiss)?;
+        manifest.record_grant_targets();
+        let mut matching = Vec::new();
+        for p in manifest.policies {
+            if p.applies_to_identity(&query.principal_role, &query.principal_id, None)? {
+                matching.push(p);
+            }
+        }
+        manifest.policies = matching;
+        let bindings_applied = manifest.policies.iter().map(|p| p.id.clone()).collect();
 
         Ok(ResolvedPolicies {
-            manifest: PolicyManifest {
-                version: manifest.version,
-                policies: matching,
-                principal_contract: manifest.principal_contract,
-            },
+            manifest,
             identity_claims: Default::default(),
             bindings_applied,
         })
@@ -187,7 +172,12 @@ impl<S: PolicyStore> PolicyStore for RedisFirstPolicyStore<S> {
         match self.redis.resolve(query).await {
             Ok(resolved) => Ok(resolved),
             // Miss or Redis hiccup: fall back to the inner store.
-            Err(_) => self.inner.resolve(query).await,
+            Err(
+                PolicastError::Cache(_)
+                | PolicastError::CacheMiss
+                | PolicastError::ResolutionRequired(_),
+            ) => self.inner.resolve(query).await,
+            Err(error) => Err(error),
         }
     }
 }

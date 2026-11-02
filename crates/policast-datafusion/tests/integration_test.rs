@@ -48,9 +48,12 @@ fn memtable() -> Arc<dyn datafusion::datasource::TableProvider> {
 
 fn full_manifest() -> PolicyManifest {
     PolicyManifest {
+        manifest_schema_version: 1,
+        row_grant_targets: Vec::new(),
         version: "1.0".into(),
         policies: vec![
             CompiledPolicy {
+                binding_selectors: Vec::new(),
                 id: "region_filter".into(),
                 effect: Effect::Permit,
                 filter_type: FilterType::RowFilter,
@@ -63,6 +66,7 @@ fn full_manifest() -> PolicyManifest {
                 description: None,
             },
             CompiledPolicy {
+                binding_selectors: Vec::new(),
                 id: "deny_legal_hold".into(),
                 effect: Effect::Forbid,
                 filter_type: FilterType::DenyOverride,
@@ -77,6 +81,7 @@ fn full_manifest() -> PolicyManifest {
                 description: None,
             },
             CompiledPolicy {
+                binding_selectors: Vec::new(),
                 id: "mask_ssn".into(),
                 effect: Effect::Forbid,
                 filter_type: FilterType::ColumnMask,
@@ -143,8 +148,11 @@ async fn test_analyst_sees_only_own_region_and_masked_ssn() {
 #[tokio::test]
 async fn test_admin_sees_all_rows_unmasked() {
     let manifest = PolicyManifest {
+        manifest_schema_version: 1,
+        row_grant_targets: Vec::new(),
         version: "1.0".into(),
         policies: vec![CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: "mask_ssn".into(),
             effect: Effect::Forbid,
             filter_type: FilterType::ColumnMask,
@@ -197,8 +205,11 @@ async fn test_admin_sees_all_rows_unmasked() {
 #[tokio::test]
 async fn test_legal_user_sees_legal_hold_rows() {
     let manifest = PolicyManifest {
+        manifest_schema_version: 1,
+        row_grant_targets: Vec::new(),
         version: "1.0".into(),
         policies: vec![CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: "deny_legal_hold".into(),
             effect: Effect::Forbid,
             filter_type: FilterType::DenyOverride,
@@ -242,8 +253,11 @@ async fn test_legal_user_sees_legal_hold_rows() {
 #[tokio::test]
 async fn test_deny_override_blocks_legal_hold() {
     let manifest = PolicyManifest {
+        manifest_schema_version: 1,
+        row_grant_targets: Vec::new(),
         version: "1.0".into(),
         policies: vec![CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: "deny_legal_hold".into(),
             effect: Effect::Forbid,
             filter_type: FilterType::DenyOverride,
@@ -300,6 +314,8 @@ async fn test_deny_override_blocks_legal_hold() {
 #[tokio::test]
 async fn test_no_policies_means_no_governance() {
     let manifest = PolicyManifest {
+        manifest_schema_version: 1,
+        row_grant_targets: Vec::new(),
         version: "1.0".into(),
         policies: vec![],
         principal_contract: None,
@@ -334,8 +350,11 @@ async fn test_no_policies_means_no_governance() {
 #[tokio::test]
 async fn test_column_mask_with_select_star() {
     let manifest = PolicyManifest {
+        manifest_schema_version: 1,
+        row_grant_targets: Vec::new(),
         version: "1.0".into(),
         policies: vec![CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: "mask_ssn".into(),
             effect: Effect::Forbid,
             filter_type: FilterType::ColumnMask,

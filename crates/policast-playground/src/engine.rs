@@ -132,6 +132,7 @@ pub struct QueryResult {
 fn filter_type_str(ft: &FilterType) -> &'static str {
     match ft {
         FilterType::RowFilter => "row_filter",
+        FilterType::RowGrant => "row_grant",
         FilterType::ColumnMask => "column_mask",
         FilterType::DenyOverride => "deny_override",
     }
@@ -209,6 +210,7 @@ pub async fn execute(params: ExecuteParams<'_>) -> Result<QueryResult, Playgroun
     );
     let applied_masks: Vec<AppliedMask> = governed
         .masked_columns()
+        .map_err(|e| PlaygroundError::Query(e.to_string()))?
         .into_iter()
         .map(|(column, mask)| AppliedMask { column, mask })
         .collect();

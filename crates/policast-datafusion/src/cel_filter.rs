@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use datafusion::common::Result as DFResult;
-use datafusion::logical_expr::{col, lit, Expr};
+#[cfg(test)]
+use datafusion::logical_expr::col;
+use datafusion::logical_expr::{lit, Expr};
 
 use policast_core::model::FilterType;
 use policast_core::PolicyManifest;
@@ -46,126 +48,135 @@ impl PrincipalProvider for QueryIdentity {
     }
 }
 
-/// Given a policy manifest and the identity of the querying user, produce
-/// DataFusion `Expr` filters to apply to a table scan.
-///
-/// Each compiled policy's CEL expression is parsed and converted into a
-/// DataFusion `Expr`. `resource.*` references become column references,
-/// `principal.*` references are bound from the identity at planning time.
+/// Translate all applicable policies before composing them; never skip invalid rules.
 pub fn build_row_filters(
     manifest: &PolicyManifest,
     table_name: &str,
     identity: &dyn PrincipalProvider,
 ) -> DFResult<Vec<Expr>> {
     let mut filters = Vec::new();
-
+    let mut grants = Vec::new();
     for policy in manifest.policies_for_table(table_name) {
+        if !applicable(policy, identity, table_name)? {
+            continue;
+        }
+        if policy.filter_type == FilterType::ColumnMask {
+            continue;
+        }
+        let expr = cel_to_datafusion_expr(&policy.cel_expression, identity)
+            .map_err(|_| {
+                policy_error(
+                    policy,
+                    table_name,
+                    "invalid, unsupported, or missing-attribute CEL",
+                )
+            })?
+            .unwrap_or_else(|| lit(true));
         match policy.filter_type {
+            FilterType::RowGrant => grants.push(expr),
             FilterType::RowFilter => {
-                match cel_to_datafusion_expr(&policy.cel_expression, identity) {
-                    Ok(Some(expr)) => filters.push(expr),
-                    Ok(None) => {}
-                    Err(e) => {
-                        eprintln!("policast: skipping row filter '{}': {e}", policy.id);
-                    }
+                if expr != lit(true) {
+                    filters.push(expr);
                 }
             }
-            FilterType::DenyOverride => match build_deny_filter(&policy.cel_expression, identity) {
-                Ok(Some(expr)) => filters.push(expr),
-                Ok(None) => {}
-                Err(e) => {
-                    eprintln!("policast: skipping deny override '{}': {e}", policy.id);
-                }
-            },
-            FilterType::ColumnMask => {}
+            FilterType::DenyOverride => filters.push(Expr::IsNotTrue(Box::new(expr))),
+            FilterType::ColumnMask => unreachable!(),
         }
     }
-
+    if manifest.requires_grant(table_name) {
+        filters.push(
+            grants
+                .into_iter()
+                .reduce(Expr::or)
+                .unwrap_or_else(|| lit(false)),
+        );
+    }
     Ok(filters)
 }
 
-/// Determine which columns should be masked for this user, returning
-/// (column_name, mask_value) pairs.
-///
-/// Uses the `cel-interpreter` runtime to evaluate the mask expression
-/// with the full principal and resource context.
+fn policy_error(
+    policy: &policast_core::model::CompiledPolicy,
+    table: &str,
+    reason: &str,
+) -> datafusion::common::DataFusionError {
+    datafusion::common::DataFusionError::Plan(format!(
+        "policy {} on table {table}: {reason}",
+        policy.id
+    ))
+}
+
+fn applicable(
+    policy: &policast_core::model::CompiledPolicy,
+    identity: &dyn PrincipalProvider,
+    table: &str,
+) -> DFResult<bool> {
+    let role = identity.attribute("role").unwrap_or_default();
+    let principal = identity
+        .attribute("principal_id")
+        .or_else(|| identity.attribute("name"))
+        .unwrap_or_default();
+    let groups = identity.attribute("groups");
+    let applies = policy
+        .applies_to_identity(&role, &principal, groups.as_deref())
+        .map_err(|_| policy_error(policy, table, "unresolved policy applicability"))?;
+    if !applies {
+        return Ok(false);
+    }
+    if policy.is_tag_scoped() {
+        return Err(policy_error(
+            policy,
+            table,
+            "tag policy requires resolver expansion",
+        ));
+    }
+    let expected = if matches!(
+        policy.filter_type,
+        FilterType::RowGrant | FilterType::RowFilter
+    ) {
+        policast_core::model::Effect::Permit
+    } else {
+        policast_core::model::Effect::Forbid
+    };
+    if policy.effect != expected {
+        return Err(policy_error(
+            policy,
+            table,
+            "invalid effect for policy kind",
+        ));
+    }
+    Ok(true)
+}
+
+/// Masks are independent of grants and fail the query on invalid applicable rules.
 pub fn build_column_masks(
     manifest: &PolicyManifest,
     table_name: &str,
     identity: &dyn PrincipalProvider,
-) -> Vec<(String, String)> {
+) -> DFResult<Vec<(String, String)>> {
     let mut masks = Vec::new();
-
     for policy in manifest.policies_for_table(table_name) {
-        if policy.filter_type != FilterType::ColumnMask {
+        if policy.filter_type != FilterType::ColumnMask
+            || !applicable(policy, identity, table_name)?
+        {
             continue;
         }
-        if let Some(col_name) = &policy.column {
-            let should_mask = match cel_to_bool(&policy.cel_expression, identity, table_name) {
-                Ok(b) => b,
-                Err(e) => {
-                    eprintln!(
-                        "policast: mask eval failed for '{}', fail-closed: {e}",
-                        policy.id
-                    );
-                    true
-                }
-            };
-            if should_mask {
-                masks.push((col_name.clone(), "***".to_string()));
-            }
+        let column = policy
+            .column
+            .as_ref()
+            .ok_or_else(|| policy_error(policy, table_name, "mask requires a concrete column"))?;
+        if cel_to_bool(&policy.cel_expression, identity, table_name).map_err(|_| {
+            policy_error(
+                policy,
+                table_name,
+                "invalid, unsupported, or missing-attribute mask CEL",
+            )
+        })? {
+            masks.push((column.clone(), "***".to_string()));
         }
     }
-
-    masks
-}
-
-/// Build a row filter from a deny-override CEL expression.
-///
-/// Deny-override expressions combine resource-side conditions (what to deny)
-/// with principal-side conditions (who is exempt). We invert the semantics:
-/// instead of "deny when X", we produce "keep rows where NOT X" for
-/// non-exempt users.
-fn build_deny_filter(
-    cel: &str,
-    identity: &dyn PrincipalProvider,
-) -> Result<Option<Expr>, crate::cel_to_expr::CelConvertError> {
-    let result = cel_to_datafusion_expr(cel, identity)?;
-    match result {
-        // If the deny condition evaluates to a dynamic expression, it means
-        // the principal-side was true (user IS subject to deny). The expression
-        // represents the "deny when true" condition on resources, so we need
-        // to keep rows where the condition is NOT true.
-        Some(deny_condition) => Ok(Some(not_expr(deny_condition))),
-        // None means constant true → user is exempt from the deny → no filter
-        None => Ok(None),
-    }
-}
-
-/// Build `NOT expr`, with special handling for simple equality to also
-/// allow NULL through (which is the common deny-override pattern for
-/// optional boolean columns).
-fn not_expr(expr: Expr) -> Expr {
-    match &expr {
-        Expr::BinaryExpr(be) if matches!(be.op, datafusion::logical_expr::Operator::Eq) => {
-            col_eq_lit_negation(&be.left, &be.right)
-                .unwrap_or_else(|| datafusion::logical_expr::not(expr.clone()))
-        }
-        _ => datafusion::logical_expr::not(expr),
-    }
-}
-
-/// For `col = true` produce `col = false OR col IS NULL` (preserving NULLs).
-fn col_eq_lit_negation(left: &Expr, right: &Expr) -> Option<Expr> {
-    if let (
-        Expr::Column(c),
-        Expr::Literal(datafusion::common::ScalarValue::Boolean(Some(val)), _),
-    ) = (left, right)
-    {
-        let col_ref = col(c.name());
-        return Some(col_ref.clone().eq(lit(!val)).or(col_ref.is_null()));
-    }
-    None
+    masks.sort();
+    masks.dedup();
+    Ok(masks)
 }
 
 #[cfg(test)]
@@ -175,6 +186,8 @@ mod tests {
 
     fn manifest_with(policies: Vec<CompiledPolicy>) -> PolicyManifest {
         PolicyManifest {
+            manifest_schema_version: 1,
+            row_grant_targets: Vec::new(),
             version: "1.0".into(),
             policies,
             principal_contract: None,
@@ -183,6 +196,7 @@ mod tests {
 
     fn row_filter_policy(id: &str, table: &str, cel: &str) -> CompiledPolicy {
         CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: id.into(),
             effect: Effect::Permit,
             filter_type: FilterType::RowFilter,
@@ -198,6 +212,7 @@ mod tests {
 
     fn deny_override_policy(id: &str, table: &str, cel: &str) -> CompiledPolicy {
         CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: id.into(),
             effect: Effect::Forbid,
             filter_type: FilterType::DenyOverride,
@@ -213,6 +228,7 @@ mod tests {
 
     fn mask_policy(id: &str, table: &str, column: &str, cel: &str) -> CompiledPolicy {
         CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: id.into(),
             effect: Effect::Forbid,
             filter_type: FilterType::ColumnMask,
@@ -306,7 +322,7 @@ mod tests {
             region: None,
             name: None,
         };
-        let masks = build_column_masks(&manifest, "patients", &identity);
+        let masks = build_column_masks(&manifest, "patients", &identity).unwrap();
         assert!(masks.is_empty(), "admin should NOT be masked");
     }
 
@@ -323,7 +339,7 @@ mod tests {
             region: None,
             name: None,
         };
-        let masks = build_column_masks(&manifest, "patients", &identity);
+        let masks = build_column_masks(&manifest, "patients", &identity).unwrap();
         assert_eq!(masks.len(), 1);
         assert_eq!(masks[0].0, "ssn");
         assert_eq!(masks[0].1, "***");

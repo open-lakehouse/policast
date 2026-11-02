@@ -44,6 +44,7 @@ enum FilterType {
   FILTER_TYPE_ROW_FILTER = 1;
   FILTER_TYPE_COLUMN_MASK = 2;
   FILTER_TYPE_DENY_OVERRIDE = 3;
+  FILTER_TYPE_ROW_GRANT = 4;
 }
 
 // Which principals a policy applies to. Mirrors `AppliesTo`. Both lists
@@ -96,6 +97,7 @@ message CompiledPolicy {
 
   // Human-readable description (Cedar @description annotation).
   optional string description = 10;
+  repeated string binding_selectors = 11;
 }
 
 // A versioned manifest of compiled policies. Mirrors `PolicyManifest`.
@@ -114,6 +116,7 @@ message PolicyManifest {
   // author-facing `version`. Lets consumers reject manifests newer than
   // they understand. New in the proto era; absent/0 means "v1".
   uint32 manifest_schema_version = 4;
+  repeated string row_grant_targets = 5;
 }
 
 // ---------------------------------------------------------------------------

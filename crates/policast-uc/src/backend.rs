@@ -136,6 +136,10 @@ impl TagRow {
 
 /// Source of governance state for the resolver.
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds #[must_use] to already-must-use boxed futures"
+)]
 pub trait ResolveBackend: Send + Sync {
     async fn policies(&self) -> Result<Vec<PolicyRow>, UcError>;
     async fn manifest(&self) -> Result<Vec<ManifestRow>, UcError>;

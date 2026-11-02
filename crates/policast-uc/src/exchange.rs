@@ -96,6 +96,8 @@ pub fn group_by_table(manifest: &PolicyManifest) -> BTreeMap<String, PolicyManif
             (
                 table,
                 PolicyManifest {
+                    manifest_schema_version: manifest.manifest_schema_version,
+                    row_grant_targets: manifest.row_grant_targets.clone(),
                     version: manifest.version.clone(),
                     policies,
                     principal_contract: manifest.principal_contract.clone(),

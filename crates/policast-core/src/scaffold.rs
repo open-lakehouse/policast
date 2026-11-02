@@ -1,7 +1,7 @@
 //! Scaffolding for the opinionated governance [profiles](crate::profile).
 //!
 //! Turns a small set of options into a correct, ready-to-edit Cedar policy
-//! for one of the three primitives. The output is guaranteed to pass the
+//! for one of the four primitives. The output is guaranteed to pass the
 //! compiler's profile validation, so `policast new` followed by
 //! `policast compile` always round-trips.
 
@@ -21,15 +21,16 @@ pub struct ScaffoldOptions {
     pub description: Option<String>,
 }
 
-/// Parse the CLI profile name (`row-filter`, `column-mask`, `deny-override`)
+/// Parse the CLI profile name (`row-filter`, `row-grant`, `column-mask`, `deny-override`)
 /// into a [`PolicyProfile`].
 pub fn parse_profile_kind(name: &str) -> Result<PolicyProfile, PolicastError> {
     match name {
         "row-filter" | "row_filter" => Ok(PolicyProfile::RowFilter),
+        "row-grant" | "row_grant" => Ok(PolicyProfile::RowGrant),
         "column-mask" | "column_mask" => Ok(PolicyProfile::ColumnMask),
         "deny-override" | "deny_override" => Ok(PolicyProfile::DenyOverride),
         other => Err(PolicastError::CelEmit(format!(
-            "unknown profile {other:?}; expected one of: row-filter, column-mask, deny-override"
+            "unknown profile {other:?}; expected one of: row-filter, row-grant, column-mask, deny-override"
         ))),
     }
 }
@@ -52,19 +53,18 @@ pub fn render_scaffold(opts: &ScaffoldOptions) -> Result<String, PolicastError> 
     }
 
     match profile {
-        PolicyProfile::RowFilter => Ok(render_row_filter(opts)),
+        PolicyProfile::RowFilter | PolicyProfile::RowGrant => {
+            Ok(render_row_policy(opts, profile.as_str()))
+        }
         PolicyProfile::ColumnMask => render_column_mask(opts),
         PolicyProfile::DenyOverride => Ok(render_deny_override(opts)),
     }
 }
 
-fn render_row_filter(opts: &ScaffoldOptions) -> String {
-    let id = opts
-        .id
-        .clone()
-        .unwrap_or_else(|| "row_filter_new".to_string());
+fn render_row_policy(opts: &ScaffoldOptions, kind: &str) -> String {
+    let id = opts.id.clone().unwrap_or_else(|| format!("{kind}_new"));
     let mut out = String::new();
-    push_header(&mut out, &id, "row_filter", opts);
+    push_header(&mut out, &id, kind, opts);
     if !opts.roles.is_empty() {
         out.push_str(&format!("@roles(\"{}\")\n", opts.roles.join(",")));
     }
@@ -243,5 +243,27 @@ mod tests {
             ..Default::default()
         };
         assert!(render_scaffold(&opts).is_err());
+    }
+    #[test]
+    fn row_grant_preserves_user_supplied_names() {
+        let cedar = render_scaffold(&ScaffoldOptions {
+            profile_kind: Some(PolicyProfile::RowGrant),
+            id: Some("row_filter_exception".into()),
+            target_table: Some("row_filter_table".into()),
+            description: Some("row_filter coexistence".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let m = compile_ok(&cedar);
+        assert_eq!(m.policies[0].id, "row_filter_exception");
+        assert_eq!(m.policies[0].target_table, "row_filter_table");
+        assert_eq!(
+            m.policies[0].description.as_deref(),
+            Some("row_filter coexistence")
+        );
+        assert_eq!(
+            m.policies[0].filter_type,
+            crate::model::FilterType::RowGrant
+        );
     }
 }

@@ -1,0 +1,2820 @@
+{
+  "rows": [
+    {
+      "id": 1,
+      "region": "east",
+      "name": "Alice",
+      "legal_hold": false,
+      "ssn": "s1"
+    },
+    {
+      "id": 2,
+      "region": "west",
+      "name": "Bob",
+      "legal_hold": true,
+      "ssn": "s2"
+    },
+    {
+      "id": 3,
+      "region": "east",
+      "name": "Bob",
+      "legal_hold": null,
+      "ssn": "s3"
+    },
+    {
+      "id": 4,
+      "region": "west",
+      "name": "Alice",
+      "legal_hold": false,
+      "ssn": "s4"
+    },
+    {
+      "id": 5,
+      "region": "north",
+      "name": "Cara",
+      "legal_hold": false,
+      "ssn": "s5"
+    },
+    {
+      "id": 6,
+      "region": null,
+      "name": "Cara",
+      "legal_hold": true,
+      "ssn": "s6"
+    }
+  ],
+  "cases": [
+    {
+      "name": "legacy_empty",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": []
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "legacy_and",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.region"
+          },
+          {
+            "id": "alice",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "resource.name == principal.name"
+          }
+        ]
+      },
+      "expected_ids": [
+        1
+      ]
+    },
+    {
+      "name": "or_overlap",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.region"
+          },
+          {
+            "id": "alice",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.name == principal.name"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "or_disjoint",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.region"
+          },
+          {
+            "id": "west",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == \"west\""
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "and_contradiction",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "resource.region == \"east\""
+          },
+          {
+            "id": "west",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "resource.region == \"west\""
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "grants_with_mandatory",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.region"
+          },
+          {
+            "id": "alice",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.name == principal.name"
+          },
+          {
+            "id": "not_three",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "resource.id != 3"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        4
+      ]
+    },
+    {
+      "name": "deny_overrides_all",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "all",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "held",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "resource.legal_hold == true"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "deny_overrides_grants",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.region"
+          },
+          {
+            "id": "alice",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.name == principal.name"
+          },
+          {
+            "id": "no_alice",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "resource.name == \"Alice\""
+          }
+        ]
+      },
+      "expected_ids": [
+        3
+      ]
+    },
+    {
+      "name": "unconditional_deny",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "all",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "deny",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "false_deny",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "all",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "deny",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "false_grant",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "grant",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "true_grant",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "all",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "grant_requirement_survives_selection",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "row_grant_targets": [
+          "patients"
+        ],
+        "policies": []
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "no_eligible_grant",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "admin",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true",
+            "applies_to": {
+              "roles": [
+                "admin"
+              ]
+            }
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "principal_scope",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bob",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true",
+            "applies_to": {
+              "principals": [
+                "bob"
+              ]
+            }
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "binding_alternatives",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bound",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true",
+            "binding_selectors": [
+              "role:admin",
+              "principal:alice"
+            ]
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "binding_and_role",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bound",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true",
+            "binding_selectors": [
+              "principal:alice"
+            ],
+            "applies_to": {
+              "roles": [
+                "admin"
+              ]
+            }
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "group_binding",
+      "principal": {
+        "role": "analyst",
+        "principal_id": "alice",
+        "groups": "finance, clinical"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "group",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true",
+            "binding_selectors": [
+              "group:clinical"
+            ]
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "mask_independent",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.region"
+          },
+          {
+            "id": "alice",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.name == principal.name"
+          },
+          {
+            "id": "mask",
+            "effect": "forbid",
+            "filter_type": "column_mask",
+            "target_table": "patients",
+            "cel_expression": "resource.table_name == \"patients\" && principal.role != \"admin\"",
+            "column": "ssn"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        3,
+        4
+      ],
+      "masked": true
+    },
+    {
+      "name": "mask_user_where",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "all",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "mask",
+            "effect": "forbid",
+            "filter_type": "column_mask",
+            "target_table": "patients",
+            "cel_expression": "resource.table_name == \"patients\" && principal.role != \"admin\"",
+            "column": "ssn"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "sql": "SELECT id, ssn FROM patients WHERE ssn = '***' ORDER BY id",
+      "masked": true
+    },
+    {
+      "name": "projection_with_policy_columns",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.region"
+          },
+          {
+            "id": "alice",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.name == principal.name"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        3,
+        4
+      ],
+      "sql": "SELECT id FROM patients ORDER BY id"
+    },
+    {
+      "name": "limit_after_governance",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "last",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.id == 5"
+          }
+        ]
+      },
+      "expected_ids": [
+        5
+      ],
+      "sql": "SELECT id FROM patients ORDER BY id LIMIT 1"
+    },
+    {
+      "name": "user_where",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.region"
+          },
+          {
+            "id": "alice",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.name == principal.name"
+          }
+        ]
+      },
+      "expected_ids": [
+        3,
+        4
+      ],
+      "sql": "SELECT id FROM patients WHERE id > 1 ORDER BY id"
+    },
+    {
+      "name": "self_join",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "east",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.region"
+          },
+          {
+            "id": "alice",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.name == principal.name"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        3,
+        4
+      ],
+      "sql": "SELECT p.id FROM patients p JOIN patients q ON p.id = q.id ORDER BY p.id"
+    },
+    {
+      "name": "arithmetic",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "even",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.id % 2 == 0"
+          }
+        ]
+      },
+      "expected_ids": [
+        2,
+        4,
+        6
+      ]
+    },
+    {
+      "name": "nested_boolean",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "nested",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "(resource.region == \"east\" || resource.region == \"west\") && resource.id != 2"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "null_restriction",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "all",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "hold",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "resource.legal_hold == true"
+          }
+        ]
+      },
+      "expected_ids": [
+        2,
+        6
+      ]
+    },
+    {
+      "name": "inapplicable_invalid",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "all",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "bad",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "resource.unknown.matches(\"x\")",
+            "applies_to": {
+              "roles": [
+                "admin"
+              ]
+            }
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "bad_cel",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bad",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.id =="
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "unsupported_cel",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bad",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region.startsWith(\"e\")"
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "missing_identity",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bad",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.missing"
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "scalar_predicate",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bad",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "42"
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "bad_mandatory",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bad",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.missing"
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "bad_deny",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bad",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.missing"
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "bad_mask",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bad",
+            "effect": "forbid",
+            "filter_type": "column_mask",
+            "target_table": "patients",
+            "cel_expression": "principal.missing == \"x\"",
+            "column": "ssn"
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "invalid_even_if_other_grant_true",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "all",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "bad",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "resource.region == principal.missing"
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "wrong_effect",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bad",
+            "effect": "forbid",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "unexpanded_tag",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "bad",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true",
+            "target_tag": "clinical"
+          }
+        ]
+      },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "schema_wildcard",
+      "principal": {
+        "role": "analyst",
+        "region": "east",
+        "name": "Alice",
+        "principal_id": "alice"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "wild",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "spark_catalog.default.*",
+            "cel_expression": "resource.id == 1"
+          }
+        ]
+      },
+      "expected_ids": [
+        1
+      ],
+      "table": "spark_catalog.default.patients"
+    },
+    {
+      "name": "grant_reads_raw_masked_column",
+      "principal": { "role": "analyst" },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          { "id": "raw_ssn", "effect": "permit", "filter_type": "row_grant", "target_table": "patients", "cel_expression": "resource.ssn == \"s1\"" },
+          { "id": "mask", "effect": "forbid", "filter_type": "column_mask", "target_table": "patients", "column": "ssn", "cel_expression": "true" }
+        ]
+      },
+      "expected_ids": [1],
+      "masked": true
+    },
+    {
+      "name": "missing_mask_column",
+      "principal": { "role": "analyst" },
+      "manifest": { "version": "1.0", "manifest_schema_version": 2, "policies": [
+        { "id": "bad", "effect": "forbid", "filter_type": "column_mask", "target_table": "patients", "column": "absent", "cel_expression": "true" }
+      ] },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "non_string_mask",
+      "principal": { "role": "analyst" },
+      "manifest": { "version": "1.0", "manifest_schema_version": 2, "policies": [
+        { "id": "bad", "effect": "forbid", "filter_type": "column_mask", "target_table": "patients", "column": "id", "cel_expression": "true" }
+      ] },
+      "expected_ids": [],
+      "error": true
+    },
+    {
+      "name": "inapplicable_bad_mask",
+      "principal": { "role": "analyst" },
+      "manifest": { "version": "1.0", "manifest_schema_version": 2, "policies": [
+        { "id": "bad", "effect": "forbid", "filter_type": "column_mask", "target_table": "patients", "column": "absent", "cel_expression": "principal.missing == 'x'", "applies_to": { "roles": ["admin"] } }
+      ] },
+      "expected_ids": [1, 2, 3, 4, 5, 6]
+    },
+    {
+      "name": "truth_table_0",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_1",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_2",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_3",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_4",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_5",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_6",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_7",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_8",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_9",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_10",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_11",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_12",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_13",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "truth_table_14",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "truth_table_15",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "false"
+          }
+        ]
+      },
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "truth_table_16",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_17",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_18",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_19",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_20",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_21",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_22",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_23",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_24",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_25",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_26",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_27",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_28",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_29",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_30",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "false"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    },
+    {
+      "name": "truth_table_31",
+      "principal": {
+        "role": "analyst"
+      },
+      "manifest": {
+        "version": "1.0",
+        "manifest_schema_version": 2,
+        "policies": [
+          {
+            "id": "truth_0",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_1",
+            "effect": "permit",
+            "filter_type": "row_grant",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_2",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_3",
+            "effect": "permit",
+            "filter_type": "row_filter",
+            "target_table": "patients",
+            "cel_expression": "true"
+          },
+          {
+            "id": "truth_4",
+            "effect": "forbid",
+            "filter_type": "deny_override",
+            "target_table": "patients",
+            "cel_expression": "true"
+          }
+        ]
+      },
+      "expected_ids": []
+    }
+  ]
+}

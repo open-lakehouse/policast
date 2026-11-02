@@ -91,49 +91,33 @@ impl ResolverCore {
         let bindings = self.backend.bindings().await?;
         let tags = self.backend.tags().await?;
 
-        let mut applied_ids: Vec<(i32, String)> = Vec::new();
-        for b in &bindings {
-            if !target_matches(&b.target, &req.table) {
-                continue;
-            }
-            if !selector_matches(&b.principal_selector, &req.principal) {
-                continue;
-            }
-            applied_ids.push((b.precedence, b.policy_id.clone()));
-        }
-        applied_ids.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        let mut seen = std::collections::HashSet::new();
-        applied_ids.retain(|(_, id)| seen.insert(id.clone()));
-
         let policies_by_id = latest_policies_by_id(&policies);
         let manifest_by_id = latest_manifest_by_id(&manifest_rows);
-
-        let mut compiled: Vec<CompiledPolicy> = Vec::new();
-        let mut binding_ids: Vec<String> = Vec::new();
-        for (_, policy_id) in &applied_ids {
-            let Some(pol) = policies_by_id.get(policy_id.as_str()) else {
-                continue;
-            };
-            let Some(man) = manifest_by_id.get(policy_id.as_str()) else {
-                continue;
-            };
-            if !role_applies(pol, &req.principal.role) {
-                continue;
+        let (mut manifest, mut expanded_from) = compile_table_manifest_with_audit(
+            &policies_by_id,
+            &manifest_by_id,
+            &bindings,
+            &tags,
+            &req.table,
+        )?;
+        let groups = req.principal.attrs.get("groups").unwrap_or("");
+        let mut selected = Vec::new();
+        for p in manifest.policies {
+            if p.applies_to_identity(&req.principal.role, &req.principal.id, Some(groups))
+                .map_err(|e| UcError::Invalid(e.to_string()))?
+            {
+                selected.push(p);
             }
-            compiled.push(row_to_compiled(pol, man)?);
-            binding_ids.push(policy_id.clone());
         }
-
-        let (expanded_policies, expanded_from) = expand_tag_scoped(compiled, &tags, &req.table)?;
-
-        let manifest = PolicyManifest {
-            version: "1.0".into(),
-            policies: expanded_policies,
-            // The flat-file store resolves from compiled CEL rows rather
-            // than Cedar EST, so the principal footprint is not recomputed
-            // on this path; it stays unset (optional, backwards-compatible).
-            principal_contract: None,
-        };
+        manifest.policies = selected;
+        let binding_ids = manifest
+            .policies
+            .iter()
+            .map(|p| p.id.split('@').next().unwrap_or(&p.id).to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        expanded_from.retain(|id, _| manifest.policies.iter().any(|p| &p.id == id));
 
         let identity_claims = identity_claims_for(&req.principal);
         let now = OffsetDateTime::now_utc();
@@ -241,6 +225,17 @@ fn compile_table_manifest(
     tags: &[TagRow],
     table: &str,
 ) -> Result<PolicyManifest, UcError> {
+    compile_table_manifest_with_audit(policies_by_id, manifest_by_id, bindings, tags, table)
+        .map(|(m, _)| m)
+}
+
+fn compile_table_manifest_with_audit(
+    policies_by_id: &BTreeMap<&str, &PolicyRow>,
+    manifest_by_id: &BTreeMap<&str, &ManifestRow>,
+    bindings: &[crate::backend::BindingRow],
+    tags: &[TagRow],
+    table: &str,
+) -> Result<(PolicyManifest, BTreeMap<String, String>), UcError> {
     let mut applied: Vec<(i32, String)> = bindings
         .iter()
         .filter(|b| target_matches(&b.target, table))
@@ -253,20 +248,36 @@ fn compile_table_manifest(
     let mut compiled: Vec<CompiledPolicy> = Vec::new();
     for (_, policy_id) in &applied {
         let Some(pol) = policies_by_id.get(policy_id.as_str()) else {
-            continue;
+            return Err(UcError::Invalid(format!(
+                "missing bound policy {policy_id}"
+            )));
         };
         let Some(man) = manifest_by_id.get(policy_id.as_str()) else {
-            continue;
+            return Err(UcError::Invalid(format!(
+                "missing compiled policy {policy_id}"
+            )));
         };
-        compiled.push(row_to_compiled(pol, man)?);
+        let mut p = row_to_compiled(pol, man)?;
+        p.binding_selectors = bindings
+            .iter()
+            .filter(|b| b.policy_id == *policy_id && target_matches(&b.target, table))
+            .map(|b| b.principal_selector.clone())
+            .collect();
+        p.binding_selectors.sort();
+        p.binding_selectors.dedup();
+        compiled.push(p);
     }
 
-    let (expanded, _audit) = expand_tag_scoped(compiled, tags, table)?;
-    Ok(PolicyManifest {
+    let (expanded, audit) = expand_tag_scoped(compiled, tags, table)?;
+    let mut manifest = PolicyManifest {
+        manifest_schema_version: 1,
+        row_grant_targets: Vec::new(),
         version: "1.0".into(),
         policies: expanded,
         principal_contract: None,
-    })
+    };
+    manifest.record_grant_targets();
+    Ok((manifest, audit))
 }
 
 /// True when `t` names a single concrete table (not `*` or `a.b.*`).
@@ -322,6 +333,7 @@ fn target_matches(target: &str, table: &str) -> bool {
     false
 }
 
+#[cfg(test)]
 fn selector_matches(sel: &str, principal: &Principal) -> bool {
     if sel == "*" {
         return true;
@@ -339,14 +351,6 @@ fn selector_matches(sel: &str, principal: &Principal) -> bool {
         return false;
     }
     false
-}
-
-fn role_applies(pol: &PolicyRow, role: &str) -> bool {
-    match &pol.applies_to_roles {
-        None => true,
-        Some(r) if r.is_empty() => true,
-        Some(r) => r.iter().any(|x| x == role),
-    }
 }
 
 fn identity_claims_for(principal: &Principal) -> BTreeMap<String, String> {
@@ -367,6 +371,7 @@ fn row_to_compiled(pol: &PolicyRow, man: &ManifestRow) -> Result<CompiledPolicy,
     };
     let filter_type = match pol.filter_type.as_str() {
         "row_filter" => FilterType::RowFilter,
+        "row_grant" => FilterType::RowGrant,
         "column_mask" => FilterType::ColumnMask,
         "deny_override" => FilterType::DenyOverride,
         other => return Err(UcError::Invalid(format!("unknown filter_type {other}"))),
@@ -376,6 +381,7 @@ fn row_to_compiled(pol: &PolicyRow, man: &ManifestRow) -> Result<CompiledPolicy,
         principals: Vec::new(),
     });
     Ok(CompiledPolicy {
+        binding_selectors: Vec::new(),
         id: pol.policy_id.clone(),
         effect,
         filter_type,
@@ -465,6 +471,7 @@ fn expand_tag_scoped(
                         format!("{} ({})", policy.id, provenance),
                     );
                     out.push(CompiledPolicy {
+                        binding_selectors: policy.binding_selectors.clone(),
                         id: expanded_id,
                         effect: policy.effect,
                         filter_type: policy.filter_type.clone(),
@@ -485,6 +492,7 @@ fn expand_tag_scoped(
                     format!("{} ({})", policy.id, provenance),
                 );
                 out.push(CompiledPolicy {
+                    binding_selectors: policy.binding_selectors.clone(),
                     id: expanded_id,
                     effect: policy.effect,
                     filter_type: policy.filter_type.clone(),
@@ -899,6 +907,7 @@ mod tests {
 
     fn base_template(id: &str, ft: FilterType) -> CompiledPolicy {
         CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: id.into(),
             effect: Effect::Permit,
             filter_type: ft,
@@ -915,6 +924,7 @@ mod tests {
     #[test]
     fn expand_passes_through_non_tag_scoped() {
         let p = CompiledPolicy {
+            binding_selectors: Vec::new(),
             id: "concrete".into(),
             target_table: "db.s.t".into(),
             ..base_template("concrete", FilterType::RowFilter)
@@ -1102,5 +1112,96 @@ mod tests {
         assert!(ids.contains(&"mask_by_pii@hospital.clinical.patients:dob"));
         assert_eq!(audit.len(), 1);
         assert!(audit.contains_key("mask_by_pii@hospital.clinical.patients:dob"));
+    }
+    #[derive(Clone)]
+    struct CompositionBackend {
+        policies: Vec<PolicyRow>,
+        manifest: Vec<ManifestRow>,
+        bindings: Vec<crate::backend::BindingRow>,
+        tags: Vec<TagRow>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::backend::ResolveBackend for CompositionBackend {
+        async fn policies(&self) -> Result<Vec<PolicyRow>, UcError> {
+            Ok(self.policies.clone())
+        }
+        async fn manifest(&self) -> Result<Vec<ManifestRow>, UcError> {
+            Ok(self.manifest.clone())
+        }
+        async fn bindings(&self) -> Result<Vec<crate::backend::BindingRow>, UcError> {
+            Ok(self.bindings.clone())
+        }
+        async fn tags(&self) -> Result<Vec<TagRow>, UcError> {
+            Ok(self.tags.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn grant_requirement_survives_tag_expansion_principal_selection_and_signing() {
+        let backend = CompositionBackend {
+            policies: vec![serde_json::from_value(serde_json::json!({
+                "policy_id": "grant", "filter_type": "row_grant", "effect": "permit",
+                "target_table": "*", "target_tag": "clinical", "version": 1
+            })).unwrap()],
+            manifest: vec![serde_json::from_value(serde_json::json!({
+                "policy_id": "grant", "cel_expression": "resource.id == 1", "version": 1
+            })).unwrap()],
+            bindings: ["role:admin", "principal:bob", "group:clinical"].iter().enumerate().map(|(i,s)| {
+                serde_json::from_value(serde_json::json!({
+                    "binding_id": format!("b{i}"), "policy_id": "grant", "target": "hospital.clinical.*",
+                    "principal_selector": s
+                })).unwrap()
+            }).collect(),
+            tags: vec![serde_json::from_value(serde_json::json!({
+                "entity": "hospital.clinical.patients", "entity_kind": "table", "tag": "clinical"
+            })).unwrap()],
+        };
+        let core = ResolverCore::new(Arc::new(backend), b"composition".to_vec());
+        let materialized = core.materialize_tables().await.unwrap();
+        let (_, full) = materialized
+            .iter()
+            .find(|(t, _)| t == "hospital.clinical.patients")
+            .unwrap();
+        assert!(full.requires_grant("hospital.clinical.patients"));
+        assert_eq!(full.policies[0].binding_selectors.len(), 3);
+        #[cfg(feature = "redis")]
+        assert_eq!(
+            PolicyManifest::from_protobuf(&full.to_protobuf()).unwrap(),
+            *full
+        );
+        for (id, role, groups, expected) in [
+            ("alice", "analyst", "", 0),
+            ("alice", "admin", "", 1),
+            ("bob", "analyst", "", 1),
+            ("alice", "analyst", "finance,clinical", 1),
+        ] {
+            let bundle = core
+                .resolve(&ResolveRequest {
+                    table: "hospital.clinical.patients".into(),
+                    requested_action: "query".into(),
+                    principal: Principal {
+                        id: id.into(),
+                        role: role.into(),
+                        attrs: PrincipalAttrs::new().with("groups", groups),
+                    },
+                })
+                .await
+                .unwrap();
+            verify(&bundle, b"composition").unwrap();
+            assert!(bundle
+                .compiled_manifest
+                .requires_grant("hospital.clinical.patients"));
+            assert_eq!(bundle.compiled_manifest.policies.len(), expected);
+            let cached_selection = full
+                .policies
+                .iter()
+                .filter(|p| p.applies_to_identity(role, id, Some(groups)).unwrap())
+                .count();
+            assert_eq!(cached_selection, expected);
+        }
+        assert!(full.policies[0]
+            .applies_to_identity("analyst", "alice", None)
+            .is_err());
     }
 }
