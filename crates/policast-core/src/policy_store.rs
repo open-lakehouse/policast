@@ -88,6 +88,10 @@ pub struct ResolvedPolicies {
 ///
 /// See module docs for the two built-in impls.
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds #[must_use] to already-must-use boxed futures"
+)]
 pub trait PolicyStore: Send + Sync {
     /// Resolve the policies that apply to `query.table` for
     /// `query.principal_*`.
@@ -221,6 +225,10 @@ pub enum CacheFailMode {
 /// [`resolved_cache_key`]. They must be cheap to clone/share (the
 /// decorator holds one) and safe to call concurrently.
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds #[must_use] to already-must-use boxed futures"
+)]
 pub trait ResolvedCache: Send + Sync {
     /// Fetch a cached entry. Returns `Ok(None)` on a miss (including an
     /// entry that has expired).
